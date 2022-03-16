@@ -1,4 +1,5 @@
-/Data
 /Logs
+*tfrecord
+*.h5
 *.pyc
 /__pycache__
