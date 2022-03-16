@@ -25,16 +25,17 @@ parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--other', default=None,)
 for key in train_config:
     parser.add_argument(f'--{key}', default=train_config[key],)
+parser.add_argument(f'--note', default="",)
 args = parser.parse_args()
 
 setup_seed(args.seed)
 
 def logging_setting(args):
-    filename = os.path.join(args.log_dir, f"{args.model_name}.txt")
+    os.makedirs(args.log_dir, exist_ok=True)
     logging.basicConfig(
-        # filename='new.log', filemode='w',
-        format="%(asctime)s %(levelname)s: \033[0;33m%(message)s\033[0m",
-        # format='%(asctime)s  %(levelname)-10s \033[0;33m%(message)s\033[0m',
+        filename=os.path.join(args.log_dir, f"run.log"), filemode='w',
+        format="%(asctime)s %(levelname)s: %(message)s",
+        # format="%(asctime)s %(levelname)s: \033[0;33m%(message)s\033[0m",
         datefmt="%Y%m%d %H:%M:%S",
         level=logging.DEBUG 
     )
@@ -42,6 +43,7 @@ def logging_setting(args):
 
 def train(args):
     logging_setting(args)
+    logging.info(f"[Note] {args.note}")
     writer = SummaryWriter(log_dir=args.log_dir)
     logging.info(f"The Dataset: {[h5path for h5path in args.h5_dir]}")
     ds = ConcatDataset([mpi_dataset(args, h5path) for h5path in args.h5_dir])
@@ -49,7 +51,7 @@ def train(args):
     train_size = int(len(ds) * 0.6)
     validate_size = int(len(ds) * 0.2)
     test_size = len(ds) - validate_size - train_size
-    logging.info(f"train,validate,test size: {train_size},{validate_size},{test_size}")
+    logging.info(f"[Data] train,validate,test size: {train_size},{validate_size},{test_size}")
 
     train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
     
@@ -85,7 +87,7 @@ def train(args):
         model.load_state_dict(torch.load(args.restore_weight))
     
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr)
+    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr,weight_decay=1e-6)
     scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
     metrics = {
         "r2": torchmetrics.R2Score().to(device),

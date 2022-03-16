@@ -12,7 +12,7 @@ train_config = {
     "best_weight":None, #path
     # "h5_dir": glob.glob("/root/*fold0*.h5"),
     "h5_dir": glob.glob("/mnt/d12t/mpi/Data/*fold0?.h5"),
-    "seed":0,
+    "seed":1,
     
 
     "img_keys":["EVI","NDVI","NIGHTLIGHTS"],
