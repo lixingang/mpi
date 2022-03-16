@@ -1,3 +1,4 @@
 /Data
 /Logs
 *.pyc
+/__pycache__
