@@ -5,6 +5,7 @@ import h5py
 import numpy as np
 import os,sys,glob
 from Utils.clock import clock
+from config import train_config
 class mpi_dataset():
     def __init__(self, args, h5path):
         '''
@@ -37,41 +38,71 @@ class mpi_dataset():
     def __del__(self):
         self.h5f.close()
 
-
-
-
-
-
 if __name__=='__main__': 
-    with h5py.File("/mnt/d12t/mpi/Data/fold0.h5") as f:
-        
-        DATASET = mpi_dataset(f)
-        dataloaders = torch.utils.data.DataLoader(
-                    dataset=DATASET,
-                    batch_size=5,
-                    shuffle=True,
-                    num_workers=1,
-                    pin_memory=False,
-                    drop_last=False)
-        for f,l in dataloaders:
-            a,b = f[0],f[1]
-            print(":",a.shape,b.shape,l.shape)
 
+    # import office packages
+    import os,sys,logging,argparse,h5py,glob,time,random,datetime
+    import torch
+    from torch.utils.data import DataLoader,ConcatDataset
+    import numpy as np
+    # import in-project packages
+    from config import train_config
+    from Losses.loss import HEMLoss,CenterLoss
+    from Models.network import Net
+    from Models.mpi_datasets import mpi_dataset
+    sys.path.append("./Metrics")
+    import Metrics.torchmetrics as torchmetrics
+    from Utils.AverageMeter import AverageMeter
+    from Utils.clock import clock,Timer
+    from Utils.setup_seed import setup_seed
 
-# class DataFromH5File(data.Dataset):
-#     def __init__(self, filepath):
-#         h5File = h5py.File(filepath, 'r')
-#         self.hr = h5File['hr']
-#         self.lr = h5File['lr']
-        
-#     def __getitem__(self, idx):
-#         label = torch.from_numpy(self.hr[idx]).float()
-#         data = torch.from_numpy(self.lr[idx]).float()
-#         return data, label
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('--other', default=None,)
+    for key in train_config:
+        parser.add_argument(f'--{key}', default=train_config[key],)
+    args = parser.parse_args()
+
+    setup_seed(args.seed)
+    ds = ConcatDataset([mpi_dataset(args, h5path) for h5path in args.h5_dir])
+
+    train_size = int(len(ds) * 0.6)
+    validate_size = int(len(ds) * 0.2)
+    test_size = len(ds) - validate_size - train_size
+    print(f"[Data] train,validate,test size: {train_size},{validate_size},{test_size}")
+
+    train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
     
-#     def __len__(self):
-#         assert self.hr.shape[0] == self.lr.shape[0], "Wrong data length"
-#         return self.hr.shape[0]
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=True, 
+        num_workers=6,
+        pin_memory=True,
+        drop_last=False,
+    )
+    validate_loader = DataLoader(
+        validate_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=True, 
+        num_workers=6, 
+        pin_memory=True,
+        drop_last=False,
+    )
+
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=False, 
+        num_workers=0,
+        drop_last=False,
+    )
+
+
+
+
+
+
+
 
 '''
 self.labels = [

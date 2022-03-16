@@ -1,14 +1,9 @@
 # import office packages
-import os,sys
+import os,sys,logging,argparse,h5py,glob,time,random,datetime
 import torch
 from torch.utils.data import DataLoader,ConcatDataset
-from torch.optim.lr_scheduler import StepLR,LambdaLR
+from torch.optim.lr_scheduler import StepLR,LambdaLR,MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
-import logging
-import argparse
-import h5py
-import glob
-import time,random,datetime
 import numpy as np
 # import in-project packages
 from config import train_config
@@ -33,15 +28,26 @@ setup_seed(args.seed)
 def logging_setting(args):
     os.makedirs(args.log_dir, exist_ok=True)
     logging.basicConfig(
-        filename=os.path.join(args.log_dir, f"run.log"), filemode='w',
+        filename=os.path.join(args.log_dir, f"run.log"), 
+        filemode='w',
         format="%(asctime)s %(levelname)s: %(message)s",
         # format="%(asctime)s %(levelname)s: \033[0;33m%(message)s\033[0m",
         datefmt="%Y%m%d %H:%M:%S",
         level=logging.DEBUG 
     )
 
+def save_args(args):
+    argsDict = args.__dict__
+    os.makedirs(args.log_dir, exist_ok=True)
+    with open(os.path.join(args.log_dir, 'setting.txt'), 'w') as f:
+        f.writelines('------------------ start ------------------' + '\n')
+        for eachArg, value in argsDict.items():
+            f.writelines(eachArg + ' : ' + str(value) + '\n')
+        f.writelines('------------------- end -------------------')
+
 
 def train(args):
+    save_args(args)
     logging_setting(args)
     logging.info(f"[Note] {args.note}")
     writer = SummaryWriter(log_dir=args.log_dir)
@@ -59,7 +65,7 @@ def train(args):
         train_dataset, 
         batch_size=args.batch_size, 
         shuffle=True, 
-        num_workers=10,
+        num_workers=4,
         pin_memory=True,
         drop_last=False,
     )
@@ -67,7 +73,7 @@ def train(args):
         validate_dataset, 
         batch_size=args.batch_size, 
         shuffle=True, 
-        num_workers=5, 
+        num_workers=4, 
         pin_memory=True,
         drop_last=False,
     )
@@ -87,8 +93,8 @@ def train(args):
         model.load_state_dict(torch.load(args.restore_weight))
     
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr,weight_decay=1e-6)
-    scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
+    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr,weight_decay=1e-3)
+    scheduler = MultiStepLR(optimizer, milestones=[20,100], gamma=0.1)
     metrics = {
         "r2": torchmetrics.R2Score().to(device),
         "mape": torchmetrics.MeanAbsolutePercentageError().to(device),
@@ -147,6 +153,7 @@ def train(args):
                 model.load_state_dict(torch.load(args.best_weight))
             _ = [metrics[k].reset() for k in metrics.keys()]
             losses = AverageMeter()
+            
             for y, fea_img, fea_num in test_loader:
                 y = y.cuda()
                 y_hat = model(fea_img.cuda(), fea_num.cuda())
@@ -159,6 +166,7 @@ def train(args):
             logging.info(f"Testing with {args.best_weight}")
             logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
             model.load_state_dict(training_weight)
+            
         
     return "OK"
 

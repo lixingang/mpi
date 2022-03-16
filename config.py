@@ -3,8 +3,8 @@ from datetime import datetime
 train_config = {
     "model_name":"mpi",
     "device":"cuda:0",
-    "epochs":500,
-    "batch_size":80,
+    "epochs":200,
+    "batch_size":60,
     "log_dir":os.path.join('Logs',datetime.now().strftime('%b%d_%H-%M-%S')),
     "init_lr":0.001,
     "best_acc":{"name":"r2", "value":0.5}, #最佳权重精度的初始值init
@@ -12,10 +12,10 @@ train_config = {
     "best_weight":None, #path
     # "h5_dir": glob.glob("/root/*fold0*.h5"),
     "h5_dir": glob.glob("/mnt/d12t/mpi/Data/*fold0?.h5"),
-    "seed":1,
+    "seed":2,
     
 
-    "img_keys":["EVI","NDVI","NIGHTLIGHTS"],
+    "img_keys":["EVI","NDVI","NIGHTLIGHTS","elevation"],
     "num_keys":[
             "tmm_sum","Households_num","Individual_num","Number of Households2",
             "area","death_num","building_area","burnedCount","conflict_num",
