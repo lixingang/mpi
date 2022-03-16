@@ -85,8 +85,8 @@ def train(args):
         model.load_state_dict(torch.load(args.restore_weight))
     
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr, weight_decay=0.01)
-    scheduler = StepLR(optimizer, step_size=30, gamma=0.5)
+    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr)
+    scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
     metrics = {
         "r2": torchmetrics.R2Score().to(device),
         "mape": torchmetrics.MeanAbsolutePercentageError().to(device),
@@ -120,7 +120,6 @@ def train(args):
             for y, fea_img, fea_num in validate_loader:
                 y = y.cuda()
                 y_hat = model(fea_img.cuda(), fea_num.cuda())
-                print(y,y_hat)
                 loss = criterion(y_hat, y)
                 losses.update(loss)
                 acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
