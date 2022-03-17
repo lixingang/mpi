@@ -19,7 +19,7 @@ from Utils.setup_seed import setup_seed
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--other', default=None,)
 for key in train_config:
-    parser.add_argument(f'--{key}', default=train_config[key],)
+    parser.add_argument(f'--{key}', default=train_config[key],type=type(train_config[key]))
 parser.add_argument(f'--note', default="",)
 args = parser.parse_args()
 
@@ -93,7 +93,7 @@ def train(args):
         model.load_state_dict(torch.load(args.restore_weight))
     
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr,weight_decay=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr,weight_decay=1e-2)
     scheduler = MultiStepLR(optimizer, milestones=[20,100], gamma=0.1)
     metrics = {
         "r2": torchmetrics.R2Score().to(device),
@@ -153,7 +153,7 @@ def train(args):
                 model.load_state_dict(torch.load(args.best_weight))
             _ = [metrics[k].reset() for k in metrics.keys()]
             losses = AverageMeter()
-            
+
             for y, fea_img, fea_num in test_loader:
                 y = y.cuda()
                 y_hat = model(fea_img.cuda(), fea_num.cuda())

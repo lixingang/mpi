@@ -46,6 +46,23 @@ def predict(args):
     logging.info(f"train,validate,test size: {train_size},{validate_size},{test_size}")
 
     train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=True, 
+        num_workers=1,
+        pin_memory=True,
+        drop_last=False,
+    )
+    validate_loader = DataLoader(
+        validate_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=True, 
+        num_workers=1, 
+        pin_memory=True,
+        drop_last=False,
+    )
+
     test_loader = DataLoader(
         test_dataset, 
         batch_size=args.batch_size, 
@@ -64,31 +81,38 @@ def predict(args):
     if args.best_weight is not None:
         model.load_state_dict(torch.load(args.best_weight))
     _ = [metrics[k].reset() for k in metrics.keys()]
-    res = {"y":[],"y_hat":[]}
+    train_res = {"y":[],"y_hat":[]}
+    validate_res = {"y":[],"y_hat":[]}
+    test_res = {"y":[],"y_hat":[]}
+    for y, fea_img, fea_num in train_loader:
+        y = y.cuda()
+        y_hat = model(fea_img.cuda(), fea_num.cuda())
+        acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+        train_res["y"].extend(y.squeeze().tolist())
+        train_res["y_hat"].extend(y_hat.squeeze().tolist())
+
+    for y, fea_img, fea_num in validate_loader:
+        y = y.cuda()
+        y_hat = model(fea_img.cuda(), fea_num.cuda())
+        acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+        validate_res["y"].extend(y.squeeze().tolist())
+        validate_res["y_hat"].extend(y_hat.squeeze().tolist())
+
     for y, fea_img, fea_num in test_loader:
         y = y.cuda()
         y_hat = model(fea_img.cuda(), fea_num.cuda())
         acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-        res["y"].extend(y.squeeze().tolist())
-        res["y_hat"].extend(y_hat.squeeze().tolist())
+        test_res["y"].extend(y.squeeze().tolist())
+        test_res["y_hat"].extend(y_hat.squeeze().tolist())
 
     logging.info(f"[test] Testing with {args.best_weight}")
     logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
-    return res
-    
-if __name__=='__main__':
-    
-    logging_setting(args)
-    setup_seed(args.seed)
-    args.best_weight = "Logs/Mar16_16-51-23/mpi_epoch80_r2_0.7185.pth"
-    args.log_dir = os.path.dirname(args.best_weight)
-    print(args.log_dir)
-    res = predict(args)
-    y,y_hat = res['y'],res['y_hat']
+    return train_res, validate_res, test_res 
+
+def plot(y,y_hat,savename):
     sorted_id = sorted(range(len(y)), key=lambda k: y[k])
     y = [y[i] for i in sorted_id]
     y_hat = [y_hat[i] for i in sorted_id]
-
     fig = plt.figure(figsize=(8, 6), dpi=200)
     ax1 = fig.add_subplot(211)
     ax1.set_xlabel('The mpi_fixed3'); ax1.set_xlim([-0.2, 0.8])
@@ -101,4 +125,19 @@ if __name__=='__main__':
     ax2.hist(y_hat, bins=100,rwidth=0.8)
 
     fig.tight_layout()
-    plt.savefig(os.path.join(args.log_dir,'test.png'))
+    plt.savefig(os.path.join(args.log_dir, savename))
+
+if __name__=='__main__':
+    
+    logging_setting(args)
+    setup_seed(args.seed)
+    args.best_weight = "Logs/Mar17_11-14-06/mpi_epoch35_r2_0.6949.pth"
+    args.log_dir = os.path.dirname(args.best_weight)
+    print(args.log_dir)
+    train_res, valid_res, test_res = predict(args)
+    plot(train_res['y'],train_res['y_hat'], "train_res.png")
+    plot(valid_res['y'],valid_res['y_hat'], "valid_res.png")
+    plot(test_res['y'],test_res['y_hat'], "test_res.png")
+
+
+    

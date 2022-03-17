@@ -4,15 +4,15 @@ train_config = {
     "model_name":"mpi",
     "device":"cuda:0",
     "epochs":200,
-    "batch_size":60,
+    "batch_size":80,
     "log_dir":os.path.join('Logs',datetime.now().strftime('%b%d_%H-%M-%S')),
     "init_lr":0.001,
     "best_acc":{"name":"r2", "value":0.5}, #最佳权重精度的初始值init
     "restore_weight":None, #path
     "best_weight":None, #path
     # "h5_dir": glob.glob("/root/*fold0*.h5"),
-    "h5_dir": glob.glob("/mnt/d12t/mpi/Data/*fold0?.h5"),
-    "seed":2,
+    "h5_dir": glob.glob("/mnt/d12t/mpi/Data/*subsetfold?.h5"),
+    "seed":1,
     
 
     "img_keys":["EVI","NDVI","NIGHTLIGHTS","elevation"],
