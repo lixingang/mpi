@@ -57,7 +57,7 @@ def train(args):
     train_size = int(len(ds) * 0.6)
     validate_size = int(len(ds) * 0.2)
     test_size = len(ds) - validate_size - train_size
-    logging.info(f"[Data] train,validate,test size: {train_size},{validate_size},{test_size}")
+    logging.info(f"[DataSize] train,validate,test: {train_size},{validate_size},{test_size}")
 
     train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
     
@@ -93,14 +93,14 @@ def train(args):
         model.load_state_dict(torch.load(args.restore_weight))
     
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr,weight_decay=1e-2)
-    scheduler = MultiStepLR(optimizer, milestones=[20,100], gamma=0.1)
+    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr)
+    scheduler = MultiStepLR(optimizer, milestones=[20], gamma=0.1)
     metrics = {
         "r2": torchmetrics.R2Score().to(device),
         "mape": torchmetrics.MeanAbsolutePercentageError().to(device),
         "mse": torchmetrics.MeanSquaredError().to(device),
     }
-    
+    best_weight = None
     for epoch in range(1, args.epochs+1):
         model.train()
         _ = [metrics[k].reset() for k in metrics.keys()]
@@ -108,7 +108,6 @@ def train(args):
         for y, fea_img, fea_num in train_loader:
             y = y.cuda()
             y_hat = model(fea_img.cuda(), fea_num.cuda())
-            # print(y,y_hat)
             loss = criterion(y_hat, y)
             loss.backward()
             losses.update(loss)
@@ -119,9 +118,9 @@ def train(args):
         writer.add_scalar("Train/loss", losses.avg(), epoch)
         writer.add_scalar("Train/r2", acc['r2'], epoch)
         writer.add_scalar("Train/mse", acc['mse'], epoch)
-        logging.info(f"[train] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
+        logging.info(f"[train] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
 
-        if epoch%5==0:
+        if epoch%3==0:
             model.eval()
             _ = [metrics[k].reset() for k in metrics.keys()]
             losses = AverageMeter()
@@ -135,22 +134,24 @@ def train(args):
                 args.best_acc["value"] = acc[args.best_acc["name"]]
                 os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
                 filename= f"{args.model_name}_epoch{epoch}_{args.best_acc['name']}_{args.best_acc['value']:.4f}.pth"
-                args.best_weight = os.path.join(args.log_dir, filename)
-                torch.save(model.state_dict(), args.best_weight)
+                args.best_weight_path = os.path.join(args.log_dir, filename)
+                # best_weight = model.state_dict()
+                torch.save(model.state_dict(), args.best_weight_path)
             writer.add_scalar("Validate/loss", losses.avg(), epoch)
             writer.add_scalar("Validate/r2", acc['r2'], epoch)
             writer.add_scalar("Validate/mse", acc['mse'], epoch)
-            logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
-            logging.debug(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
+            logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+            logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
             
         scheduler.step()
         
         
-        if epoch%10==0:
+        if epoch%20==0:
             model.eval()
             training_weight = model.state_dict()
-            if args.best_weight is not None:
-                model.load_state_dict(torch.load(args.best_weight))
+            if args.best_weight_path is not None:
+                logging.info(f"[test] loading best weight: {args.best_weight_path}")
+                model.load_state_dict(torch.load(args.best_weight_path))
             _ = [metrics[k].reset() for k in metrics.keys()]
             losses = AverageMeter()
 
@@ -163,8 +164,8 @@ def train(args):
             writer.add_scalar("Test/loss", losses.avg(), epoch)
             writer.add_scalar("Test/r2", acc['r2'], epoch)
             writer.add_scalar("Test/mse", acc['mse'], epoch)
-            logging.info(f"Testing with {args.best_weight}")
-            logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
+            logging.info(f"Testing with {args.best_weight_path}")
+            logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
             model.load_state_dict(training_weight)
             
         

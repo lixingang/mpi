@@ -113,16 +113,22 @@ def plot(y,y_hat,savename):
     sorted_id = sorted(range(len(y)), key=lambda k: y[k])
     y = [y[i] for i in sorted_id]
     y_hat = [y_hat[i] for i in sorted_id]
-    fig = plt.figure(figsize=(8, 6), dpi=200)
-    ax1 = fig.add_subplot(211)
-    ax1.set_xlabel('The mpi_fixed3'); ax1.set_xlim([-0.2, 0.8])
+    n_bin = 100
+    fig = plt.figure(figsize=(10, 6), dpi=200)
+    ax1 = fig.add_subplot(311)
+    ax1.set_xlabel('The mpi_fixed3'); ax1.set_xlim([-0.8, 0.8])
     ax1.set_ylabel('volts')
-    ax1.hist(y, bins=100,rwidth=0.8)
+    n, bins, patches = ax1.hist(y, bins=100,rwidth=0.8)
 
-    ax2 = fig.add_subplot(212)
-    ax2.set_xlabel('The predicted MPI '); ax2.set_xlim([-0.2, 0.8])
+    ax2 = fig.add_subplot(312)
+    ax2.set_xlabel('The predicted MPI '); ax2.set_xlim([-0.8, 0.8])
     ax2.set_ylabel('volts')
-    ax2.hist(y_hat, bins=100,rwidth=0.8)
+    n, bins, patches = ax2.hist(y_hat, bins=100,rwidth=0.8)
+
+    ax3 = fig.add_subplot(313)
+    ax3.set_xlabel('The predicted MPI ');
+    ax3.set_ylabel('volts')
+    n, bins, patches = ax3.hist([y_hat[i]-y[i] for i in range(len(y))], bins=100,rwidth=0.8)
 
     fig.tight_layout()
     plt.savefig(os.path.join(args.log_dir, savename))
@@ -131,7 +137,7 @@ if __name__=='__main__':
     
     logging_setting(args)
     setup_seed(args.seed)
-    args.best_weight = "Logs/Mar17_11-14-06/mpi_epoch35_r2_0.6949.pth"
+    args.best_weight = "Logs/Mar17_21-39-09/mpi_epoch141_r2_0.6843.pth"
     args.log_dir = os.path.dirname(args.best_weight)
     print(args.log_dir)
     train_res, valid_res, test_res = predict(args)
