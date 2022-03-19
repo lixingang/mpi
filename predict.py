@@ -10,7 +10,7 @@ import glob
 import time,random,datetime
 import numpy as np
 import matplotlib.pyplot as plt
-
+import json
 # import in-project packages
 from config import train_config
 from Losses.loss import HEMLoss,CenterLoss
@@ -21,13 +21,20 @@ import Metrics.torchmetrics as torchmetrics
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
+from Utils.ConfigDict import ConfigDict
+
+
+
 
 parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument('--other', default=None,)
-for key in train_config:
-    parser.add_argument(f'--{key}', default=train_config[key],)
-# parser.add_argument(f'--tag', default="",)
+parser.add_argument(f'--log_dir', default= "Logs/Mar19_19-51-44/config.json",)
 args = parser.parse_args()
+args = ConfigDict(args.log_dir)
+print(args.seed)
+# for key in train_config:
+#     parser.add_argument(f'--{key}', default=train_config[key],)
+# parser.add_argument(f'--tag', default="",)
+
 
 def logging_setting(args):
     logging.basicConfig(
@@ -134,16 +141,16 @@ def plot(y,y_hat,savename):
     plt.savefig(os.path.join(args.log_dir, savename))
 
 if __name__=='__main__':
-    
-    logging_setting(args)
-    setup_seed(args.seed)
-    args.best_weight = "Logs/Mar17_21-39-09/mpi_epoch141_r2_0.6843.pth"
-    args.log_dir = os.path.dirname(args.best_weight)
-    print(args.log_dir)
-    train_res, valid_res, test_res = predict(args)
-    plot(train_res['y'],train_res['y_hat'], "train_res.png")
-    plot(valid_res['y'],valid_res['y_hat'], "valid_res.png")
-    plot(test_res['y'],test_res['y_hat'], "test_res.png")
+    pass
+    # logging_setting(args)
+    # setup_seed(args.seed)
+    # # args.best_weight = "Logs/Mar17_21-39-09/mpi_epoch141_r2_0.6843.pth"
+    # args.log_dir = os.path.dirname(args.best_weight)
+    # print(args.log_dir)
+    # train_res, valid_res, test_res = predict(args)
+    # plot(train_res['y'],train_res['y_hat'], "train_res.png")
+    # plot(valid_res['y'],valid_res['y_hat'], "valid_res.png")
+    # plot(test_res['y'],test_res['y_hat'], "test_res.png")
 
 
     

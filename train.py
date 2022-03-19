@@ -1,6 +1,6 @@
 # import office packages
-import os,sys,logging,argparse,h5py,glob,time,random,datetime
-import torch
+import os,sys,yaml
+import torch,logging,argparse,h5py,glob,time,random,datetime,shutil
 from torch.utils.data import DataLoader,ConcatDataset
 from torch.optim.lr_scheduler import StepLR,LambdaLR,MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
@@ -15,14 +15,15 @@ import Metrics.torchmetrics as torchmetrics
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
+from Utils.ConfigDict import ConfigDict
 
+config = ConfigDict("config.json")
+config['log_dir'] = os.path.join("Logs", datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
 parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument('--other', default=None,)
 for key in train_config:
-    parser.add_argument(f'--{key}', default=train_config[key],type=type(train_config[key]))
-parser.add_argument(f'--note', default="",)
+    parser.add_argument(f'--{key}', default=config[key],type=type(config[key]))
+parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
-
 setup_seed(args.seed)
 
 def logging_setting(args):
@@ -37,25 +38,22 @@ def logging_setting(args):
     )
 
 def save_args(args):
+    
     argsDict = args.__dict__
     os.makedirs(args.log_dir, exist_ok=True)
-    with open(os.path.join(args.log_dir, 'setting.txt'), 'w') as f:
-        f.writelines('------------------ start ------------------' + '\n')
-        for eachArg, value in argsDict.items():
-            f.writelines(eachArg + ' : ' + str(value) + '\n')
-        f.writelines('------------------- end -------------------')
-
+    with open(os.path.join(args.log_dir, 'config.yaml'), 'w') as f:
+        yaml.dump(argsDict, f)
 
 def train(args):
-    save_args(args)
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     logging_setting(args)
     logging.info(f"[Note] {args.note}")
     writer = SummaryWriter(log_dir=args.log_dir)
     logging.info(f"The Dataset: {[h5path for h5path in args.h5_dir]}")
     ds = ConcatDataset([mpi_dataset(args, h5path) for h5path in args.h5_dir])
 
-    train_size = int(len(ds) * 0.6)
-    validate_size = int(len(ds) * 0.2)
+    train_size = int(len(ds) * 0.7)
+    validate_size = int(len(ds) * 0.15)
     test_size = len(ds) - validate_size - train_size
     logging.info(f"[DataSize] train,validate,test: {train_size},{validate_size},{test_size}")
 
@@ -86,7 +84,7 @@ def train(args):
         drop_last=False,
     )
 
-    device = torch.device(args.device)
+    device = torch.device("cuda")
     model = Net(args).to(device)
 
     if args.restore_weight is not None:
@@ -100,7 +98,8 @@ def train(args):
         "mape": torchmetrics.MeanAbsolutePercentageError().to(device),
         "mse": torchmetrics.MeanSquaredError().to(device),
     }
-    best_weight = None
+    
+    early_stop = 0 #  early stop
     for epoch in range(1, args.epochs+1):
         model.train()
         _ = [metrics[k].reset() for k in metrics.keys()]
@@ -121,54 +120,71 @@ def train(args):
         logging.info(f"[train] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
 
         if epoch%3==0:
-            model.eval()
-            _ = [metrics[k].reset() for k in metrics.keys()]
-            losses = AverageMeter()
-            for y, fea_img, fea_num in validate_loader:
-                y = y.cuda()
-                y_hat = model(fea_img.cuda(), fea_num.cuda())
-                loss = criterion(y_hat, y)
-                losses.update(loss)
-                acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-            if acc[args.best_acc["name"]]>args.best_acc["value"]:
-                args.best_acc["value"] = acc[args.best_acc["name"]]
-                os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
-                filename= f"{args.model_name}_epoch{epoch}_{args.best_acc['name']}_{args.best_acc['value']:.4f}.pth"
-                args.best_weight_path = os.path.join(args.log_dir, filename)
-                # best_weight = model.state_dict()
-                torch.save(model.state_dict(), args.best_weight_path)
-            writer.add_scalar("Validate/loss", losses.avg(), epoch)
-            writer.add_scalar("Validate/r2", acc['r2'], epoch)
-            writer.add_scalar("Validate/mse", acc['mse'], epoch)
-            logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
-            logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
+            with torch.no_grad():
+                _ = [metrics[k].reset() for k in metrics.keys()]
+                losses = AverageMeter()
+                for y, fea_img, fea_num in validate_loader:
+                    y = y.cuda()
+                    y_hat = model(fea_img.cuda(), fea_num.cuda())
+                    loss = criterion(y_hat, y)
+                    losses.update(loss)
+                    acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+                if acc[args.best_acc["name"]]<args.best_acc["value"]:
+                    args.best_acc["value"] = float(acc[args.best_acc["name"]])
+                    os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
+                    filename= f"{args.model_name}_epoch{epoch}_{args.best_acc['name']}_{args.best_acc['value']:.4f}.pth"
+                    args.best_weight_path = os.path.join(args.log_dir, filename)
+                    # best_weight = model.state_dict()
+                    torch.save(model.state_dict(), args.best_weight_path)
+                    early_stop = 0
+                else:
+                    early_stop += 1
+                    logging.info(f"Early Stop Counter {early_stop} of {args.max_early_stop}.")
+                    if early_stop >= args.max_early_stop:
+                        break
+                writer.add_scalar("Validate/loss", losses.avg(), epoch)
+                writer.add_scalar("Validate/r2", acc['r2'], epoch)
+                writer.add_scalar("Validate/mse", acc['mse'], epoch)
+                logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+                logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
             
         scheduler.step()
         
         
-        if epoch%20==0:
-            model.eval()
-            training_weight = model.state_dict()
-            if args.best_weight_path is not None:
-                logging.info(f"[test] loading best weight: {args.best_weight_path}")
-                model.load_state_dict(torch.load(args.best_weight_path))
-            _ = [metrics[k].reset() for k in metrics.keys()]
-            losses = AverageMeter()
-
-            for y, fea_img, fea_num in test_loader:
-                y = y.cuda()
-                y_hat = model(fea_img.cuda(), fea_num.cuda())
-                loss = criterion(y_hat, y)
-                losses.update(loss)
-                acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-            writer.add_scalar("Test/loss", losses.avg(), epoch)
-            writer.add_scalar("Test/r2", acc['r2'], epoch)
-            writer.add_scalar("Test/mse", acc['mse'], epoch)
-            logging.info(f"Testing with {args.best_weight_path}")
-            logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
-            model.load_state_dict(training_weight)
-            
-        
+        if epoch%10==0:
+            with torch.no_grad():
+                training_weight = model.state_dict()
+                if args.best_weight_path is not None:
+                    # logging.info(f"[test] loading best weight: {args.best_weight_path}")
+                    model.load_state_dict(torch.load(args.best_weight_path))
+                _ = [metrics[k].reset() for k in metrics.keys()]
+                for y, fea_img, fea_num in test_loader:
+                    y = y.cuda()
+                    y_hat = model(fea_img.cuda(), fea_num.cuda())
+                    acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+                writer.add_scalar("Test/r2", acc['r2'], epoch)
+                writer.add_scalar("Test/mse", acc['mse'], epoch)
+                logging.info(f"[test] Testing with {args.best_weight_path}")
+                logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+                model.load_state_dict(training_weight)
+    
+    # 
+    with torch.no_grad():
+        logging.info(f"[test] Finish training or trigger early stop")
+        if args.best_weight_path is not None:
+            # logging.info(f"[test] loading best weight: {args.best_weight_path}")
+            model.load_state_dict(torch.load(args.best_weight_path))
+        _ = [metrics[k].reset() for k in metrics.keys()]
+        for y, fea_img, fea_num in test_loader:
+            y = y.cuda()
+            y_hat = model(fea_img.cuda(), fea_num.cuda())
+            acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+        writer.add_scalar("Test/r2", acc['r2'], epoch)
+        writer.add_scalar("Test/mse", acc['mse'], epoch)
+        logging.info(f"[test] Testing with {args.best_weight_path}")
+        logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+    
+    save_args(args)
     return "OK"
 
 

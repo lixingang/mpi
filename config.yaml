@@ -1,0 +1,51 @@
+batch_size: 40
+best_acc:
+  name: mse
+  value: 99
+best_weight_path: null
+epochs: 200
+gpu: '0'
+h5_dir:
+- Data/subsetfold3.h5
+- Data/subsetfold0.h5
+- Data/subsetfold1.h5
+- Data/subsetfold2.h5
+img_keys:
+- EVI
+- NDVI
+- NIGHTLIGHTS
+- elevation
+init_lr: 0.001
+label_keys:
+- MPI3_fixed
+log_dir: Logs/Mar19_20-59-56
+max_early_stop: 10
+model_name: mpi
+num_keys:
+- tmm_sum
+- Households_num
+- Individual_num
+- Number of Households2
+- area
+- death_num
+- building_area
+- burnedCount
+- conflict_num
+- death_num
+- place_num
+- poi_num
+- pr_sum
+- water
+- DHSCLUST1
+other_label_keys:
+- H
+- A
+- education
+- health
+- Living Standards
+pos_keys:
+- lat
+- lon
+- name
+restore_weight: null
+seed: 0
