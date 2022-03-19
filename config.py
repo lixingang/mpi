@@ -11,7 +11,7 @@ train_config = {
     "restore_weight":None, #path
     "best_weight_path":None, #path
     # "h5_dir": glob.glob("/root/*fold0*.h5"),
-    "h5_dir": glob.glob("/mnt/d12t/mpi/Data/*subsetfold?.h5"),
+    "h5_dir": glob.glob("Data/*subsetfold?.h5"),
     "seed":4,
     
 
