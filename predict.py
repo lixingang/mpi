@@ -1,3 +1,4 @@
+from distutils.log import error
 import matplotlib.pyplot as plt
 import os,sys
 import torch
@@ -10,9 +11,9 @@ import glob
 import time,random,datetime
 import numpy as np
 import matplotlib.pyplot as plt
-import json
+from scipy.stats import pearsonr
+
 # import in-project packages
-from config import train_config
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
 from Models.mpi_datasets import mpi_dataset
@@ -22,20 +23,7 @@ from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
 from Utils.ConfigDict import ConfigDict
-
-
-
-
-parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument(f'--log_dir', default= "Logs/Mar19_19-51-44/config.json",)
-args = parser.parse_args()
-args = ConfigDict(args.log_dir)
-print(args.seed)
-# for key in train_config:
-#     parser.add_argument(f'--{key}', default=train_config[key],)
-# parser.add_argument(f'--tag', default="",)
-
-
+import math
 def logging_setting(args):
     logging.basicConfig(
         # filename='new.log', filemode='w',
@@ -44,11 +32,26 @@ def logging_setting(args):
         datefmt="%Y%m%d %H:%M:%S",
         level=logging.INFO 
     )
+def get_bin_index(y, y_hat, min_value, max_value, num_bin):
+    error = [y_hat[i]-y[i] for i in range(len(y))]
+    unit = (max_value-min_value)/num_bin
+    xbins = np.arange(min_value, max_value, unit, dtype=float )
+    error_list = [0 for i in range(num_bin)]
+    count_list = [0 for i in range(num_bin)]
+    for i in range(len(y)):
+        index = int(y[i]//unit)
+        index = index if index<num_bin-1 else num_bin-1
+        
+        error_list[index]+=abs(error[i])
+        count_list[index]+=1
+    error_list = [error_list[i]/count_list[i] if count_list[i]!=0 else 0 for i in range(len(error_list))]
+    return xbins, error_list, count_list, 
 
 def predict(args):
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     ds = ConcatDataset([mpi_dataset(args, h5path) for h5path in args.h5_dir])
-    train_size = int(len(ds) * 0.6)
-    validate_size = int(len(ds) * 0.2)
+    train_size = int(len(ds) * 0.7)
+    validate_size = int(len(ds) * 0.15)
     test_size = len(ds) - validate_size - train_size
     logging.info(f"train,validate,test size: {train_size},{validate_size},{test_size}")
 
@@ -77,46 +80,45 @@ def predict(args):
         num_workers=1,
         drop_last=False,
     )
-    device = torch.device(args.device)
-    model = Net(args).to(device)
+    model = Net(args).cuda()
     metrics = {
-        "r2": torchmetrics.R2Score().to(device),
-        "mape": torchmetrics.MeanAbsolutePercentageError().to(device),
-        "mse": torchmetrics.MeanSquaredError().to(device),
+        "r2": torchmetrics.R2Score().cuda(),
+        "mape": torchmetrics.MeanAbsolutePercentageError().cuda(),
+        "mse": torchmetrics.MeanSquaredError().cuda(),
     }
-    model.eval()
-    if args.best_weight is not None:
-        model.load_state_dict(torch.load(args.best_weight))
-    _ = [metrics[k].reset() for k in metrics.keys()]
-    train_res = {"y":[],"y_hat":[]}
-    validate_res = {"y":[],"y_hat":[]}
-    test_res = {"y":[],"y_hat":[]}
-    for y, fea_img, fea_num in train_loader:
-        y = y.cuda()
-        y_hat = model(fea_img.cuda(), fea_num.cuda())
-        acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-        train_res["y"].extend(y.squeeze().tolist())
-        train_res["y_hat"].extend(y_hat.squeeze().tolist())
+    with torch.no_grad():
+        assert args.best_weight_path is not None
+        model.load_state_dict(torch.load(args.best_weight_path))
+        _ = [metrics[k].reset() for k in metrics.keys()]
+        train_res = {"y":[],"y_hat":[]}
+        validate_res = {"y":[],"y_hat":[]}
+        test_res = {"y":[],"y_hat":[]}
+        for y, fea_img, fea_num in train_loader:
+            y = y.cuda()
+            y_hat = model(fea_img.cuda(), fea_num.cuda())
+            acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+            train_res["y"].extend(y.squeeze().tolist())
+            train_res["y_hat"].extend(y_hat.squeeze().tolist())
 
-    for y, fea_img, fea_num in validate_loader:
-        y = y.cuda()
-        y_hat = model(fea_img.cuda(), fea_num.cuda())
-        acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-        validate_res["y"].extend(y.squeeze().tolist())
-        validate_res["y_hat"].extend(y_hat.squeeze().tolist())
+        for y, fea_img, fea_num in validate_loader:
+            y = y.cuda()
+            y_hat = model(fea_img.cuda(), fea_num.cuda())
+            acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+            validate_res["y"].extend(y.squeeze().tolist())
+            validate_res["y_hat"].extend(y_hat.squeeze().tolist())
 
-    for y, fea_img, fea_num in test_loader:
-        y = y.cuda()
-        y_hat = model(fea_img.cuda(), fea_num.cuda())
-        acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-        test_res["y"].extend(y.squeeze().tolist())
-        test_res["y_hat"].extend(y_hat.squeeze().tolist())
+        for y, fea_img, fea_num in test_loader:
+            y = y.cuda()
+            y_hat = model(fea_img.cuda(), fea_num.cuda())
+            acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+            test_res["y"].extend(y.squeeze().tolist())
+            test_res["y_hat"].extend(y_hat.squeeze().tolist())
 
-    logging.info(f"[test] Testing with {args.best_weight}")
-    logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
-    return train_res, validate_res, test_res 
+        logging.info(f"[test] Testing with {args.best_weight_path}")
+        logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
+        return train_res, validate_res, test_res 
 
-def plot(y,y_hat,savename):
+def plot(args,y,y_hat,savename):
     sorted_id = sorted(range(len(y)), key=lambda k: y[k])
     y = [y[i] for i in sorted_id]
     y_hat = [y_hat[i] for i in sorted_id]
@@ -140,17 +142,39 @@ def plot(y,y_hat,savename):
     fig.tight_layout()
     plt.savefig(os.path.join(args.log_dir, savename))
 
-if __name__=='__main__':
-    pass
-    # logging_setting(args)
-    # setup_seed(args.seed)
-    # # args.best_weight = "Logs/Mar17_21-39-09/mpi_epoch141_r2_0.6843.pth"
-    # args.log_dir = os.path.dirname(args.best_weight)
-    # print(args.log_dir)
-    # train_res, valid_res, test_res = predict(args)
-    # plot(train_res['y'],train_res['y_hat'], "train_res.png")
-    # plot(valid_res['y'],valid_res['y_hat'], "valid_res.png")
-    # plot(test_res['y'],test_res['y_hat'], "test_res.png")
+def plot_list(args, xbins, y, savename):
+    fig = plt.figure(figsize=(10, 6), dpi=200)
+    plt.bar(xbins, y)
+    plt.bar(xbins, y)
+    plt.savefig(os.path.join(args.log_dir, savename))
 
+if __name__=='__main__':
+    
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument(f'--log_dir', default= "Logs/Mar20_20-43-30",)
+    args = parser.parse_args()
+    args = ConfigDict(os.path.join(args.log_dir, "config.yaml"))
+    logging_setting(args)
+    setup_seed(args.seed)
+    train_res, valid_res, test_res = predict(args)
+    # plot(args, train_res['y'],train_res['y_hat'], "train_res.png")
+    # plot(args, valid_res['y'],valid_res['y_hat'], "valid_res.png")
+    # plot(args, test_res['y'],test_res['y_hat'], "test_res.png")
+    # plot()
+    y = train_res['y']
+    y_hat = train_res['y_hat']
+    print("Train Pearsonr(y,y_hat):", pearsonr(y,y_hat))
+    xbins, error_list, count_list  = get_bin_index(y,y_hat,0,1,100)
+    # print(xbins, error_list, count_list, )
+    plot_list(args, range(len(error_list)), error_list, "train_error_list.png")
+    plot_list(args,  range(len(count_list)), count_list, "train_count_list.png")
+
+    y = test_res['y']
+    y_hat = test_res['y_hat']
+    print("Test Pearsonr(y,y_hat):", pearsonr(y,y_hat))
+    xbins, error_list, count_list  = get_bin_index(y,y_hat,0,1,100)
+    # print(xbins, error_list, count_list, )
+    plot_list(args, range(len(error_list)), error_list, "test_error_list.png")
+    plot_list(args,  range(len(count_list)), count_list, "test_count_list.png")
 
     

@@ -1,9 +1,9 @@
-batch_size: 40
+batch_size: 60
 best_acc:
   name: mse
   value: 99
 best_weight_path: null
-epochs: 200
+epochs: 300
 gpu: '0'
 h5_dir:
 - Data/subsetfold3.h5
@@ -16,10 +16,17 @@ img_keys:
 - NIGHTLIGHTS
 - elevation
 init_lr: 0.001
+scheduler:
+  milestones:
+  - 20
+  - 40
+  - 80
+  gamma: 0.1
+sche: milestones=[20], gamma=0.1
 label_keys:
 - MPI3_fixed
-log_dir: Logs/Mar19_20-59-56
-max_early_stop: 10
+log_dir: None
+max_early_stop: 20
 model_name: mpi
 num_keys:
 - tmm_sum

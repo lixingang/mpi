@@ -1,2 +1,3 @@
 pytorch
 pyDeprecate: pip install pyDeprecate
+pyyaml

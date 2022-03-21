@@ -6,7 +6,6 @@ from torch.optim.lr_scheduler import StepLR,LambdaLR,MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 # import in-project packages
-from config import train_config
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
 from Models.mpi_datasets import mpi_dataset
@@ -17,10 +16,10 @@ from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
 from Utils.ConfigDict import ConfigDict
 
-config = ConfigDict("config.json")
+config = ConfigDict("config.yaml")
 config['log_dir'] = os.path.join("Logs", datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
 parser = argparse.ArgumentParser(description='Process some integers.')
-for key in train_config:
+for key in config:
     parser.add_argument(f'--{key}', default=config[key],type=type(config[key]))
 parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
@@ -84,19 +83,18 @@ def train(args):
         drop_last=False,
     )
 
-    device = torch.device("cuda")
-    model = Net(args).to(device)
+    model = Net(args).cuda()
 
     if args.restore_weight is not None:
         model.load_state_dict(torch.load(args.restore_weight))
     
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(model.parameters(),lr=args.init_lr)
-    scheduler = MultiStepLR(optimizer, milestones=[20], gamma=0.1)
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),lr=args.init_lr)
+    scheduler = MultiStepLR(optimizer, **args.scheduler)
     metrics = {
-        "r2": torchmetrics.R2Score().to(device),
-        "mape": torchmetrics.MeanAbsolutePercentageError().to(device),
-        "mse": torchmetrics.MeanSquaredError().to(device),
+        "r2": torchmetrics.R2Score().cuda(),
+        "mape": torchmetrics.MeanAbsolutePercentageError().cuda(),
+        "mse": torchmetrics.MeanSquaredError().cuda(),
     }
     
     early_stop = 0 #  early stop

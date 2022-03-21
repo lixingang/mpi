@@ -7,30 +7,28 @@ if __name__=="__main__":
     sys.path.append("..")
     from mobilenetv3 import MobileNetV3_Small
     from Utils.clock import clock
-    from config import train_config
 else:
     from Models.mobilenetv3 import MobileNetV3_Small
     from Utils.clock import clock
-    from config import train_config
     
 class Net(nn.Module):
     def __init__(self, args):
 
         super().__init__()
-        self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=128)
+        self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=256)
         self.Lnet = nn.Sequential(
-            nn.Linear(len(args.num_keys), 128),
+            nn.Linear(len(args.num_keys), 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-        )
-        self.fclayer = nn.Sequential(
             nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(256, 256),
+        )
+        self.fclayer = nn.Sequential(
+            nn.Linear(512, 512),
             nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 1),
             # nn.Softmax(dim=1)
         )
         

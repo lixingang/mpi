@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 import os,sys,glob
 from Utils.clock import clock
-from config import train_config
+# from config import train_config
 class mpi_dataset():
     def __init__(self, args, h5path):
         '''
