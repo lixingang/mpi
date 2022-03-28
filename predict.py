@@ -22,7 +22,7 @@ import Metrics.torchmetrics as torchmetrics
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
-from Utils.ConfigDict import ConfigDict
+from Utils.ParseYAML import ParseYAML
 import math
 def logging_setting(args):
     logging.basicConfig(

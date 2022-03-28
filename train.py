@@ -14,10 +14,10 @@ import Metrics.torchmetrics as torchmetrics
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
-from Utils.ConfigDict import ConfigDict
+from Utils.ParseYAML import ParseYAML
 
-config = ConfigDict("config.yaml")
-config['log_dir'] = os.path.join("Logs", datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
+config = ParseYAML("config.yaml")
+config['log_dir'] = os.path.join("Logs", config["model_name"], datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
 parser = argparse.ArgumentParser(description='Process some integers.')
 for key in config:
     parser.add_argument(f'--{key}', default=config[key],type=type(config[key]))
@@ -143,7 +143,7 @@ def train(args):
                 writer.add_scalar("Validate/loss", losses.avg(), epoch)
                 writer.add_scalar("Validate/r2", acc['r2'], epoch)
                 writer.add_scalar("Validate/mse", acc['mse'], epoch)
-                logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+                logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
                 logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
             
         scheduler.step()
@@ -163,7 +163,7 @@ def train(args):
                 writer.add_scalar("Test/r2", acc['r2'], epoch)
                 writer.add_scalar("Test/mse", acc['mse'], epoch)
                 logging.info(f"[test] Testing with {args.best_weight_path}")
-                logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+                logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
                 model.load_state_dict(training_weight)
     
     # 
@@ -180,7 +180,7 @@ def train(args):
         writer.add_scalar("Test/r2", acc['r2'], epoch)
         writer.add_scalar("Test/mse", acc['mse'], epoch)
         logging.info(f"[test] Testing with {args.best_weight_path}")
-        logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+        logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
     
     save_args(args)
     return "OK"

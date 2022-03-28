@@ -1,5 +1,5 @@
 import yaml
-class ConfigDict(dict):
+class ParseYAML(dict):
     """
     Makes a  dictionary behave like an object,with attribute-style access.
     """
