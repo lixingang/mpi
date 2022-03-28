@@ -46,7 +46,6 @@ if __name__=='__main__':
     from torch.utils.data import DataLoader,ConcatDataset
     import numpy as np
     # import in-project packages
-    from config import train_config
     from Losses.loss import HEMLoss,CenterLoss
     from Models.network import Net
     from Models.mpi_datasets import mpi_dataset

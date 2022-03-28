@@ -19,10 +19,9 @@ init_lr: 0.001
 scheduler:
   milestones:
   - 20
-  - 40
-  - 80
+  - 60
+  - 100
   gamma: 0.1
-sche: milestones=[20], gamma=0.1
 label_keys:
 - MPI3_fixed
 log_dir: None
