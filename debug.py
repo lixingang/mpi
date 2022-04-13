@@ -1,5 +1,5 @@
 import h5py
-from Models.mpi_datasets import mpi_dataset
+from Datasets.mpi_datasets import mpi_dataset
 from Utils.clock import clock
 import torch
 with h5py.File("/mnt/d12t/mpi/Data/fold0.h5") as f:

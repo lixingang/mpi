@@ -16,7 +16,7 @@ from scipy.stats import pearsonr
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
-from Models.mpi_datasets import mpi_dataset
+from Datasets.mpi_datasets import mpi_dataset
 sys.path.append("./Metrics")
 import Metrics.torchmetrics as torchmetrics
 from Utils.AverageMeter import AverageMeter
