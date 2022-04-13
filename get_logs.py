@@ -1,4 +1,4 @@
-from ast import Str
+import numpy as np
 import os,argparse
 import glob
 import pandas as pd
@@ -38,24 +38,34 @@ def parse_log(path):
 
 
 parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument(f'--dir', default=None,type=str)
+parser.add_argument(f'--dir', default="mpi",type=str)
 args = parser.parse_args()
+
+def compute_average(res_list):
+    res = [float(i) for i in res_list]
+    res = np.array(res)
+    return np.average(res)
 
 if __name__=='__main__':
     assert args.dir!=None
-    items = {"time":[],"seed":[],"r2":[],"rmse":[],"mape":[]}
+    items = {"name":[],"seed":[],"r2":[],"rmse":[],"mape":[]}
     log_list = glob.glob(f"Logs/{args.dir}/*")
     for log in log_list:
         cfg = ParseYAML(os.path.join(log,"config.yaml"))
         r2,rmse,mape = parse_log(os.path.join(log,"run.log"))
-        items["time"].append(log)
+        items["name"].append(log)
         items["seed"].append(cfg.seed)
         items["r2"].append(r2)
         items["rmse"].append(rmse)
         items["mape"].append(mape)
+    items["name"].append("Average")
+    items["seed"].append("-1")
+    items["r2"].append(compute_average(items["r2"]))
+    items["rmse"].append(compute_average(items["rmse"]))
+    items["mape"].append(compute_average(items["mape"]))
     print(items)
     df = pd.DataFrame(items,index=None)
-    df.to_csv(f"records_{args.dir}.csv",index=False)
+    df.to_csv(f"Logs/records_{args.dir}.csv",index=False)
 
     
 

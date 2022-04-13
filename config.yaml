@@ -6,10 +6,10 @@ best_weight_path: null
 epochs: 300
 gpu: '0'
 h5_dir:
-- Data/subsetfold3.h5
-- Data/subsetfold0.h5
-- Data/subsetfold1.h5
-- Data/subsetfold2.h5
+- Data/v1/subsetfold3.h5
+- Data/v1/subsetfold0.h5
+- Data/v1/subsetfold1.h5
+- Data/v1/subsetfold2.h5
 init_lr: 0.001
 scheduler:
   milestones:
