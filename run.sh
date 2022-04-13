@@ -14,7 +14,7 @@
 #     python train.py --seed 70 --gpu 2; \
 #     python train.py --seed 80 --gpu 2; \
 #     python train.py --seed 90 --gpu 2; echo "gpu-2 Done"; 
-# ) & sleep 2s
+# ) & sleep 1s
 
 # wait
 
