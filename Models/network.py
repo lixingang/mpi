@@ -3,13 +3,10 @@ import torch.nn as nn
 import torch
 import numpy as np
 import os,sys
-if __name__=="__main__":
-    sys.path.append("..")
-    from mobilenetv3 import MobileNetV3_Small
-    from Utils.clock import clock
-else:
-    from Models.mobilenetv3 import MobileNetV3_Small
-    from Utils.clock import clock
+
+from Utils.clock import clock
+from Models.mobilenetv3 import MobileNetV3_Small
+from Utils.clock import clock
     
 class Net(nn.Module):
     def __init__(self, args):
@@ -17,7 +14,7 @@ class Net(nn.Module):
         super().__init__()
         # self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=128)
         self.Lnet1 = nn.Sequential(
-            nn.Linear(len(args.num_keys), 128),
+            nn.Linear(len(args.img_keys)*10, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             nn.Linear(128, 128),
@@ -42,13 +39,9 @@ class Net(nn.Module):
         
     def forward(self,img, num):
         # print(img.size())
-        img = img.permute(0,3,1,2)
-        img = self.Cnet(img)
-        num = self.Lnet(num.float())
-        # print("---")
-        # print(img)
-        # print(num)
-
+        img = img.view(img.shape[0],-1)
+        img = self.Lnet1(img.float())
+        num = self.Lnet2(num.float())
         x = torch.cat((img,num),1)
         x = self.fclayer(x)
         # print(x)
@@ -59,7 +52,7 @@ class Net(nn.Module):
 
 if __name__=="__main__":
 
-    A=torch.rand(60,10,255,255)
+    A=torch.rand(60,10,25)
     B=torch.rand(60,19)  
     Label=torch.rand(60,1)
     model = Net()

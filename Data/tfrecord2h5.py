@@ -8,14 +8,6 @@ import pandas as pd
 from tqdm import tqdm
 import shutil
 
-import tfrecord as tfr
-import h5py
-import os,sys
-import numpy as np
-import glob
-import pandas as pd
-from tqdm import tqdm
-
 norm_max = {
     'poi_num': 420.0, 'slope': 79.886566, 'DHSCLUST1': 1311.0, 'LON': 13.966692, 'MPI_Easy4_fixed': 0.207, 'Living Standards': 1.0, 
     'osm': 2338.1528, 'pr_sum': 3586.076, 'NIR': 1.3015, 'TEMP1': 315.55, 'GREEN': 1.0481, 'burnedCount': 224.0, 'NIGHTLIGHTS': 2944.24, 
@@ -66,7 +58,7 @@ class TfrecordWorker():
             if shape[0]==255*255:
                 self.dset[label] = self.h5f.create_dataset(
                     label,
-                    shape=[self.data_size,255*255],
+                    shape=[self.data_size,10],
                     compression=None,
                     dtype=typee 
                 )
@@ -103,9 +95,11 @@ class TfrecordWorker():
                 content = record[key]
                 if content.shape[0]==255*255:
                     # content = np.reshape(content, (255,255))
-                    content = content
+                    hist,bins = np.histogram(content,bins=10,range=(norm_min[key],norm_max[key]),density=True)
+                    # print(hist, )
+                    content = hist
 
-                if key not in ["year","LAT","LON","lat","lon","name","H","A","education","health","Living Standards"]:
+                elif key not in ["country","year","LAT","LON","lat","lon","name","H","A","education","health","Living Standards"]:
                     content = (content-norm_min[key]) / (norm_max[key]-norm_min[key])
 
 
@@ -134,6 +128,7 @@ def start(files, savename):
     worker.write_h5f()
     worker.close_h5f()
 
+os.system("rm v2/*.h5")
 # start(glob.glob("raw_data/*.tfrecord"),"data.h5")
 start(glob.glob("raw_data_removed/*fold0*.tfrecord"),"v2/subsetfold0.h5")
 start(glob.glob("raw_data_removed/*fold1*.tfrecord"),"v2/subsetfold1.h5")

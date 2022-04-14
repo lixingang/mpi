@@ -6,10 +6,10 @@ best_weight_path: null
 epochs: 300
 gpu: '0'
 h5_dir:
-- Data/v1/subsetfold3.h5
-- Data/v1/subsetfold0.h5
-- Data/v1/subsetfold1.h5
-- Data/v1/subsetfold2.h5
+- Data/v2/subsetfold3.h5
+- Data/v2/subsetfold0.h5
+- Data/v2/subsetfold1.h5
+- Data/v2/subsetfold2.h5
 init_lr: 0.001
 scheduler:
   milestones:
@@ -21,13 +21,35 @@ label_keys:
 - MPI3_fixed
 log_dir: None
 max_early_stop: 15
-model_name: baseline
+model_name: mpi
 img_keys:
+- AOD047
+- AOD055
+- BLUE
 - EVI
+- GREEN
 - NDVI
 - NIGHTLIGHTS
+- NIR
+- RED
+- SWIR1
+- SWIR2
+- TEMP1
+- age_struct_child
+- age_struct_middle
+- age_struct_old
+- age_struct_young
+- aspect
 - elevation
+- male
+- osm
+- pr
+- slope
+- tmmn
+- tmmx
+- viirs_v2
 num_keys:
+- DHSCLUST1
 - tmm_sum
 - Households_num
 - Individual_num
