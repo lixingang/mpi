@@ -15,8 +15,16 @@ class Net(nn.Module):
     def __init__(self, args):
 
         super().__init__()
-        self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=128)
-        self.Lnet = nn.Sequential(
+        # self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=128)
+        self.Lnet1 = nn.Sequential(
+            nn.Linear(len(args.num_keys), 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
+        )
+        self.Lnet2 = nn.Sequential(
             nn.Linear(len(args.num_keys), 128),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
