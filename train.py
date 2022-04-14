@@ -180,19 +180,24 @@ def train(args):
     
     # 
     with torch.no_grad():
+        res = {"name":[],"y":[],"y_hat":[]}
         logging.info(f"[test] Finish training or trigger early stop")
         if args.best_weight_path is not None:
             # logging.info(f"[test] loading best weight: {args.best_weight_path}")
             model.load_state_dict(torch.load(args.best_weight_path))
         _ = [metrics[k].reset() for k in metrics.keys()]
-        for y, fea_img, fea_num,_ in test_loader:
+        for y, fea_img, fea_num, name in test_loader:
             y = y.cuda()
             y_hat = model(fea_img.cuda(), fea_num.cuda())
             acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+            res["name"].extend(name)
+            res["y"].extend(y)
+            res["y_hat"].extend(y_hat)
         writer.add_scalar("Test/r2", acc['r2'], epoch)
         writer.add_scalar("Test/mse", acc['mse'], epoch)
         logging.info(f"[test] Testing with {args.best_weight_path}")
         logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
+
     
     save_args(args)
     return "OK"
