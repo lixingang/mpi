@@ -21,7 +21,7 @@ label_keys:
 - MPI3_fixed
 log_dir: None
 max_early_stop: 15
-model_name: mpi
+model_name: baseline
 img_keys:
 - EVI
 - NDVI

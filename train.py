@@ -4,13 +4,14 @@ import torch,logging,argparse,h5py,glob,time,random,datetime,shutil
 from torch.utils.data import DataLoader,ConcatDataset
 from torch.optim.lr_scheduler import StepLR,LambdaLR,MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
+import torchmetrics
 import numpy as np
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
 from Datasets.mpi_datasets import mpi_dataset
 sys.path.append("./Metrics")
-import Metrics.torchmetrics as torchmetrics
+
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
