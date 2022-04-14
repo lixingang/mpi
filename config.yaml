@@ -20,7 +20,7 @@ scheduler:
 label_keys:
 - MPI3_fixed
 log_dir: None
-max_early_stop: 15
+max_early_stop: 20
 model_name: mpi
 img_keys:
 - AOD047

@@ -1,16 +1,4 @@
-'''
-"img_keys":["RED","BLUE","GREEN","SWIR2","EVI","NIR","NDVI","SWIR1","NIGHTLIGHTS","elevation"],
-"num_keys":[
-        "tmm_sum","Households_num","Individual_num","Number of Households2","Living Standards",
-        "area","death_num","building_area","burnedCount","conflict_num","death_num","education",
-        "health","place_num","poi_num","pr_sum","water","H","DHSCLUST1"
-    ],
-"pos_keys":["lat","lon","name"],
-"label_keys":["MPI3_fixed"],
-}
-'''
-
 2022年4月13日 16点46分 使用随机数10,20,30,...,100,数据是Data/v1, 得到baseline的结果baseline.csv,r2=0.504
 2022年4月13日 16点47分 新增branch: latest，将卷积换成全连接，看精度是否有变化？
 2022年4月14日 09点59分 卷积换成全连接，图像数据先归一化再直方图化成10维的向量，由于数据量减少，也新增了一些图像数据。
-                      新数据保存在Data/v2下
+                      新数据保存在Data/v2下，r2=0.62,RMSE=0.027,MAPE=1.9

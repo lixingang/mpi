@@ -14,26 +14,26 @@ class Net(nn.Module):
         super().__init__()
         # self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=128)
         self.Lnet1 = nn.Sequential(
-            nn.Linear(len(args.img_keys)*10, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(len(args.img_keys)*10, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(128, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
         )
         self.Lnet2 = nn.Sequential(
-            nn.Linear(len(args.num_keys), 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(len(args.num_keys), 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(128, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
         )
         self.fclayer = nn.Sequential(
-            nn.Linear(256, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(1024, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(inplace=True),
-            nn.Linear(256, 1),
+            nn.Linear(1024, 1),
             # nn.Softmax(dim=1)
         )
         

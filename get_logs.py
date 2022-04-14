@@ -65,7 +65,7 @@ if __name__=='__main__':
     items["mape"].append(compute_average(items["mape"]))
     print(items)
     df = pd.DataFrame(items,index=None)
-    df.to_csv(f"Logs/records_{args.dir}.csv",index=False)
+    df.to_csv(f"Logs/{args.dir}/STAT_{args.dir}.csv",index=False)
 
     
 

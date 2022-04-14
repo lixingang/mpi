@@ -6,12 +6,11 @@ from torch.optim.lr_scheduler import StepLR,LambdaLR,MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 import torchmetrics
 import numpy as np
+import pandas as pd
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
 from Datasets.mpi_datasets import mpi_dataset
-sys.path.append("./Metrics")
-
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
@@ -44,21 +43,33 @@ def save_args(args):
     with open(os.path.join(args.log_dir, 'config.yaml'), 'w') as f:
         yaml.dump(argsDict, f)
 
+def save_namelist_from_Dataset(d,savename):
+    names = []
+    for _, _, _,name in d:
+        names.append(name)
+    df = pd.DataFrame({savename:names})
+    df.to_csv(savename)
+
+
 def train(args):
+    
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     logging_setting(args)
     logging.info(f"[Note] {args.note}")
     writer = SummaryWriter(log_dir=args.log_dir)
+    
     logging.info(f"The Dataset: {[h5path for h5path in args.h5_dir]}")
     ds = ConcatDataset([mpi_dataset(args, h5path) for h5path in args.h5_dir])
-
+    
     train_size = int(len(ds) * 0.7)
     validate_size = int(len(ds) * 0.15)
     test_size = len(ds) - validate_size - train_size
     logging.info(f"[DataSize] train,validate,test: {train_size},{validate_size},{test_size}")
 
     train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
-    
+    save_namelist_from_Dataset(train_dataset,os.path.join(args.log_dir, 'train_dataset.csv'))
+    save_namelist_from_Dataset(validate_dataset,os.path.join(args.log_dir, 'validate_dataset.csv'))
+    save_namelist_from_Dataset(test_dataset,os.path.join(args.log_dir, 'test_dataset.csv'))
     train_loader = DataLoader(
         train_dataset, 
         batch_size=args.batch_size, 
@@ -103,7 +114,7 @@ def train(args):
         model.train()
         _ = [metrics[k].reset() for k in metrics.keys()]
         losses = AverageMeter()
-        for y, fea_img, fea_num in train_loader:
+        for y, fea_img, fea_num, _ in train_loader:
             y = y.cuda()
             y_hat = model(fea_img.cuda(), fea_num.cuda())
             loss = criterion(y_hat, y)
@@ -122,7 +133,7 @@ def train(args):
             with torch.no_grad():
                 _ = [metrics[k].reset() for k in metrics.keys()]
                 losses = AverageMeter()
-                for y, fea_img, fea_num in validate_loader:
+                for y, fea_img, fea_num, _ in validate_loader:
                     y = y.cuda()
                     y_hat = model(fea_img.cuda(), fea_num.cuda())
                     loss = criterion(y_hat, y)
@@ -157,7 +168,7 @@ def train(args):
                     # logging.info(f"[test] loading best weight: {args.best_weight_path}")
                     model.load_state_dict(torch.load(args.best_weight_path))
                 _ = [metrics[k].reset() for k in metrics.keys()]
-                for y, fea_img, fea_num in test_loader:
+                for y, fea_img, fea_num, _ in test_loader:
                     y = y.cuda()
                     y_hat = model(fea_img.cuda(), fea_num.cuda())
                     acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
@@ -174,7 +185,7 @@ def train(args):
             # logging.info(f"[test] loading best weight: {args.best_weight_path}")
             model.load_state_dict(torch.load(args.best_weight_path))
         _ = [metrics[k].reset() for k in metrics.keys()]
-        for y, fea_img, fea_num in test_loader:
+        for y, fea_img, fea_num,_ in test_loader:
             y = y.cuda()
             y_hat = model(fea_img.cuda(), fea_num.cuda())
             acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
