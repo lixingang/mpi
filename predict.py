@@ -34,24 +34,18 @@ def logging_setting(args):
         datefmt="%Y%m%d %H:%M:%S",
         level=logging.INFO 
     )
-def get_bin_index(y, y_hat, min_value, max_value, num_bin):
-    error = [y_hat[i]-y[i] for i in range(len(y))]
-    unit = (max_value-min_value)/num_bin
-    xbins = np.arange(min_value, max_value, unit, dtype=float )
-    error_list = [0 for i in range(num_bin)]
-    count_list = [0 for i in range(num_bin)]
-    for i in range(len(y)):
-        index = int(y[i]//unit)
-        index = index if index<num_bin-1 else num_bin-1
-        
-        error_list[index]+=abs(error[i])
-        count_list[index]+=1
-    error_list = [error_list[i]/count_list[i] if count_list[i]!=0 else 0 for i in range(len(error_list))]
-    return xbins, error_list, count_list, 
-def predict(args, any_dataset):
-    pass
-    
 
+def get_hist(y, min_value=0.0, maxs_value=1., step=0.01 ):
+    sorted_id = sorted(range(len(y)), key=lambda k: y[k])
+    y = np.array([y[i] for i in sorted_id])
+    hist_index = {}
+    iter_list = np.arange(min_value, maxs_value, step)
+    for i in iter_list:
+        start = i
+        end = i+step
+        hist_index[round(end,2)] = np.where((y>start)&(y<=end))[0]
+    return hist_index, iter_list
+    
 # def plot_list(args, xbins, y, savename):
 #     fig = plt.figure(figsize=(10, 6), dpi=200)
 #     plt.bar(xbins, y)
@@ -77,7 +71,7 @@ if __name__=='__main__':
     train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
 
     any_dataloader = DataLoader(
-        test_dataset, 
+        train_dataset, 
         batch_size=args.batch_size, 
         shuffle=True, 
         num_workers=1,
@@ -107,37 +101,38 @@ if __name__=='__main__':
         logging.info(f"r2={acc['r2']:.3f} rmse={acc['mse']:.3f} mape:{acc['mape']:.3f}")
         
 
-    y = res["y"]
-    y_hat = res['y_hat']
-    diff = [abs(y[i]-y_hat[i]) for i in range(len(y))]
+    y = np.array(res["y"])
+    y_hat = np.array(res['y_hat'])
+    diff = np.abs(y-y_hat)
+    
+    hist_index, iter_list = get_hist(y,0.,1.,0.02)
+    hist_count = [len(hist_index[k]) for k in hist_index.keys()]
+    hist_error = [np.average(diff[hist_index[key]]) if len(hist_index[key])!=0 else 0 for key in hist_index.keys()]
 
-    sorted_id = sorted(range(len(y)), key=lambda k: y[k])
-    y = [y[i] for i in sorted_id]
-    y_hat = [y_hat[i] for i in sorted_id]
-    diff = [diff[i] for i in sorted_id]
+    
+    fig, axs = plt.subplots(ncols=2, nrows=2,figsize=(12,10))
+    axs[0,0].bar(iter_list, hist_count, width=0.01)
+    axs[0,0].set_xlabel('The count distribution')
 
-    fig = plt.figure(figsize=(10, 6), dpi=200)
-    ax1 = fig.add_subplot(311)
-    ax1.set_xlabel('The mpi_fixed3'); ax1.set_xlim([-0.8, 0.8])
-    ax1.hist(y, bins=100,rwidth=0.8)
-    ax2 = fig.add_subplot(312)
-    ax2.set_xlabel('The predicted MPI '); ax2.set_xlim([-0.8, 0.8])
-    ax2.hist(y_hat, bins=100,rwidth=0.8)
-    ax3 = fig.add_subplot(313)
-    ax3.set_xlabel('|y-y_hat| ');
-    ax3.hist(diff, bins=100,rwidth=0.8)
+    axs[0,1].bar(iter_list, hist_error, width=0.01)
+    axs[0,1].set_xlabel('The error distribution')
+    
+    axs[1,0].hist(y, bins=100, rwidth=0.8)
+    axs[1,0].set_xlabel('y') 
+    # axs[1,0].set_xlim([-0.8, 0.8])
+
+    axs[1,1].hist(y_hat, bins=100, rwidth=0.8)
+    axs[1,1].set_xlabel('y_hat')
+    # axs[1,1].set_xlim([-0.8, 0.8])
+    plt.tight_layout() 
     plt.savefig(os.path.join(args.log_dir, "vis_results.png"))
-    # plot()
 
 
-
-    y = res['y']
-    y_hat = res['y_hat']
-    print("Pearsonr(y,y_hat):", pearsonr(y,diff))
+    print("Pearsonr(y,y_hat):", pearsonr(hist_count,hist_error))
     # xbins, error_list, count_list  = get_bin_index(y,y_hat,0,1,100)
     # print(xbins, error_list, count_list, )
     # plot_list(args, range(len(error_list)), error_list, "error_list.png")
     # plot_list(args,  range(len(count_list)), count_list, "count_list.png")
 
 
-    
+   
