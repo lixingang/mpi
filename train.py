@@ -1,6 +1,6 @@
 # import office packages
 import os,sys,yaml
-import torch,logging,argparse,h5py,glob,time,random,datetime,shutil
+import torch,logging,argparse,glob,time,random,datetime,shutil
 from torch.utils.data import DataLoader,ConcatDataset
 from torch.optim.lr_scheduler import StepLR,LambdaLR,MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
@@ -10,19 +10,23 @@ import pandas as pd
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
+# from Models.gp import GaussianProcess
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
 from Utils.setup_seed import setup_seed
 from Utils.ParseYAML import ParseYAML
 
+
 config = ParseYAML("config.yaml")
-config['log_dir'] = os.path.join("Logs", config["model_name"], datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
 parser = argparse.ArgumentParser(description='Process some integers.')
 for key in config:
     parser.add_argument(f'--{key}', default=config[key],type=type(config[key]))
 parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
+args.log_dir = os.path.join("Logs", args.model_name, datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
+# for arg in vars(args):
+#     print( arg, getattr(args, arg))
 setup_seed(args.seed)
 
 def logging_setting(args):
@@ -43,12 +47,17 @@ def save_args(args):
     with open(os.path.join(args.log_dir, 'config.yaml'), 'w') as f:
         yaml.dump(argsDict, f)
 
-def save_namelist_from_Dataset(d,savename):
-    names = []
-    for _, _, _,name in d:
-        names.append(name)
-    df = pd.DataFrame({savename:names})
-    df.to_csv(savename)
+def split_train_test(data_list, ratio=[0.6,0.2,0.2]):
+    idx = list(range(len(data_list)))
+    random.shuffle(idx)
+    assert len(ratio)>=2 and len(ratio)<=3
+    assert np.sum(np.array(ratio))==1.0
+    slice1 = int(len(idx)*ratio[0])
+    slice2 = int(len(idx)*(ratio[1]+ratio[0]))
+    if len(ratio)==2:
+        return data_list[:slice1],data_list[slice1:slice2]
+    else:
+        return data_list[:slice1],data_list[slice1:slice2],data_list[slice2:]
 
 
 def train(args):
@@ -58,18 +67,18 @@ def train(args):
     logging.info(f"[Note] {args.note}")
     writer = SummaryWriter(log_dir=args.log_dir)
     
-    logging.info(f"The Dataset: {[h5path for h5path in args.h5_dir]}")
-    ds = ConcatDataset([mpi_dataset(args, h5path) for h5path in args.h5_dir])
-    
-    train_size = int(len(ds) * 0.7)
-    validate_size = int(len(ds) * 0.15)
-    test_size = len(ds) - validate_size - train_size
-    logging.info(f"[DataSize] train,validate,test: {train_size},{validate_size},{test_size}")
+    data_list = np.array(glob.glob(f"{args.data_dir}/*"))
+    train_list, valid_list, test_list = split_train_test(data_list, [0.7,0.15,0.15])
+    with open(os.path.join(args.log_dir, 'train_valid_test.yaml'), 'w') as f:
+        yaml.dump({"train_list":train_list.tolist(),"valid_list":valid_list.tolist(),"test_list":test_list.tolist(),}, f)
 
-    train_dataset, validate_dataset, test_dataset = torch.utils.data.random_split(ds, [train_size, validate_size, test_size])
-    save_namelist_from_Dataset(train_dataset,os.path.join(args.log_dir, 'train_dataset.csv'))
-    save_namelist_from_Dataset(validate_dataset,os.path.join(args.log_dir, 'validate_dataset.csv'))
-    save_namelist_from_Dataset(test_dataset,os.path.join(args.log_dir, 'test_dataset.csv'))
+
+    logging.info(f"[DataSize] train,validate,test: {len(train_list)},{len(valid_list)},{len(test_list)}")
+
+    train_dataset = mpi_dataset(args, train_list)
+    valid_dataset = mpi_dataset(args, valid_list)
+    test_dataset = mpi_dataset(args, test_list)
+
     train_loader = DataLoader(
         train_dataset, 
         batch_size=args.batch_size, 
@@ -78,8 +87,8 @@ def train(args):
         pin_memory=True,
         drop_last=False,
     )
-    validate_loader = DataLoader(
-        validate_dataset, 
+    valid_loader = DataLoader(
+        valid_dataset, 
         batch_size=args.batch_size, 
         shuffle=True, 
         num_workers=4, 
@@ -114,8 +123,10 @@ def train(args):
         model.train()
         _ = [metrics[k].reset() for k in metrics.keys()]
         losses = AverageMeter()
-        for y, fea_img, fea_num, _ in train_loader:
-            y = y.cuda()
+        for fea, lbl in train_loader:
+            fea_img = fea[0]
+            fea_num = fea[1]
+            y = lbl["MPI3_fixed"].cuda()
             y_hat = model(fea_img.cuda(), fea_num.cuda())
             loss = criterion(y_hat, y)
             loss.backward()
@@ -133,16 +144,19 @@ def train(args):
             with torch.no_grad():
                 _ = [metrics[k].reset() for k in metrics.keys()]
                 losses = AverageMeter()
-                for y, fea_img, fea_num, _ in validate_loader:
-                    y = y.cuda()
+                for fea, lbl in valid_loader:
+                    fea_img = fea[0]
+                    fea_num = fea[1]
+                    y = lbl["MPI3_fixed"].cuda()
                     y_hat = model(fea_img.cuda(), fea_num.cuda())
                     loss = criterion(y_hat, y)
                     losses.update(loss)
                     acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+                acc = {k: metrics[k].compute() for k in metrics.keys()}
                 if acc[args.best_acc["name"]]<args.best_acc["value"]:
                     args.best_acc["value"] = float(acc[args.best_acc["name"]])
                     os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
-                    filename= f"{args.model_name}_epoch{epoch}_{args.best_acc['name']}_{args.best_acc['value']:.4f}.pth"
+                    filename= f"epoch{epoch}_{args.best_acc['name']}_{args.best_acc['value']:.4f}.pth"
                     args.best_weight_path = os.path.join(args.log_dir, filename)
                     # best_weight = model.state_dict()
                     torch.save(model.state_dict(), args.best_weight_path)
@@ -165,13 +179,15 @@ def train(args):
             with torch.no_grad():
                 training_weight = model.state_dict()
                 if args.best_weight_path is not None:
-                    # logging.info(f"[test] loading best weight: {args.best_weight_path}")
                     model.load_state_dict(torch.load(args.best_weight_path))
                 _ = [metrics[k].reset() for k in metrics.keys()]
-                for y, fea_img, fea_num, _ in test_loader:
-                    y = y.cuda()
+                for fea, lbl in test_loader:
+                    fea_img = fea[0]
+                    fea_num = fea[1]
+                    y = lbl["MPI3_fixed"].cuda()
                     y_hat = model(fea_img.cuda(), fea_num.cuda())
                     acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+                acc = {k: metrics[k].compute() for k in metrics.keys()}
                 writer.add_scalar("Test/r2", acc['r2'], epoch)
                 writer.add_scalar("Test/mse", acc['mse'], epoch)
                 logging.info(f"[test] Testing with {args.best_weight_path}")
@@ -186,17 +202,22 @@ def train(args):
             # logging.info(f"[test] loading best weight: {args.best_weight_path}")
             model.load_state_dict(torch.load(args.best_weight_path))
         _ = [metrics[k].reset() for k in metrics.keys()]
-        for y, fea_img, fea_num, name in test_loader:
-            y = y.cuda()
+        for fea, lbl in test_loader:
+            fea_img = fea[0]
+            fea_num = fea[1]
+            y = lbl["MPI3_fixed"].cuda()
             y_hat = model(fea_img.cuda(), fea_num.cuda())
             acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-            res["name"].extend(name)
-            res["y"].extend(y)
-            res["y_hat"].extend(y_hat)
+            res["name"].extend(lbl["name"])
+            res["y"].extend(y.cpu().numpy())
+            res["y_hat"].extend(y_hat.cpu().numpy())
+        acc = {k: metrics[k].compute() for k in metrics.keys()}
         writer.add_scalar("Test/r2", acc['r2'], epoch)
         writer.add_scalar("Test/mse", acc['mse'], epoch)
         logging.info(f"[test] Testing with {args.best_weight_path}")
         logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
+        res = pd.DataFrame(res)
+        res.to_csv(f"{args.log_dir}/test_result.csv")
 
     
     save_args(args)

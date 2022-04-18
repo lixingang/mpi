@@ -11,6 +11,7 @@ class HEMLoss(nn.Module):
         self.margin = margin
 
     def forward(self, pred,real):
+
         cond = torch.abs(real - pred) > self.margin
         
         if cond.long().sum() > 0:

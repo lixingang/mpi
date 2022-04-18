@@ -38,7 +38,7 @@ def parse_log(path):
 
 
 parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument(f'--dir', default="mpi",type=str)
+parser.add_argument(f'--log_dir', default="mpi",type=str)
 args = parser.parse_args()
 
 def compute_average(res_list):
@@ -47,9 +47,9 @@ def compute_average(res_list):
     return np.average(res)
 
 if __name__=='__main__':
-    assert args.dir!=None
+    assert args.log_dir!=None
     items = {"name":[],"seed":[],"r2":[],"rmse":[],"mape":[]}
-    log_list = glob.glob(f"Logs/{args.dir}/*")
+    log_list = glob.glob(f"Logs/{args.log_dir}/*")
     for log in log_list:
         cfg = ParseYAML(os.path.join(log,"config.yaml"))
         r2,rmse,mape = parse_log(os.path.join(log,"run.log"))
@@ -63,9 +63,9 @@ if __name__=='__main__':
     items["r2"].append(compute_average(items["r2"]))
     items["rmse"].append(compute_average(items["rmse"]))
     items["mape"].append(compute_average(items["mape"]))
-    print(items)
+    #print(items)
     df = pd.DataFrame(items,index=None)
-    df.to_csv(f"Logs/{args.dir}/STAT_{args.dir}.csv",index=False)
+    df.to_csv(f"Logs/{args.log_dir}/STAT_{args.log_dir}.csv",index=False)
 
     
 

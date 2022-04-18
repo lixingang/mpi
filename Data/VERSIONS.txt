@@ -1,6 +1,7 @@
 v1 有卷积
 v2 归一化、对图像直方图化
-
+v3 pth格式保存，一个tfrecord对应一个文件，源自raw_data
+v3 pth格式保存，一个tfrecord对应一个文件，源自raw_data_removed
 
 '''
 "img_keys":["RED","BLUE","GREEN","SWIR2","EVI","NIR","NDVI","SWIR1","NIGHTLIGHTS","elevation"],

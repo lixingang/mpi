@@ -1,4 +1,4 @@
-files=$(ls -d Logs/mpi/*/)
+files=$(ls -d Logs/mpi_full/*/)
 for file in $files
 do
     echo predicting $file ...

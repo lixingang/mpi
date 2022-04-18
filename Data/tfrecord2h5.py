@@ -93,15 +93,22 @@ class TfrecordWorker():
                     extra_info[key]=[]
 
                 content = record[key]
+
                 if content.shape[0]==255*255:
                     # content = np.reshape(content, (255,255))
                     hist,bins = np.histogram(content,bins=10,range=(norm_min[key],norm_max[key]),density=True)
+                    if np.isnan(np.sum(hist)):
+                        print("rplace by zeros")
+                        hist = np.zeros_like(hist)
                     # print(hist, )
                     content = hist
 
-                elif key not in ["country","year","LAT","LON","lat","lon","name","H","A","education","health","Living Standards"]:
+                elif key not in ["country","year","LAT","LON","lat","lon","name","H","A","education",
+                                 "health","MPI3_fixed","Living Standards","MPI_Easy4_fixed"]:
+                    if norm_max[key]-norm_min[key]==0:
+                        print(key,"encounter 0")
+                        
                     content = (content-norm_min[key]) / (norm_max[key]-norm_min[key])
-
 
 
                 self.dset[key][idx] = content
@@ -128,12 +135,12 @@ def start(files, savename):
     worker.write_h5f()
     worker.close_h5f()
 
-os.system("rm v2/*.h5")
+# os.system("rm v2/*.h5")
 # start(glob.glob("raw_data/*.tfrecord"),"data.h5")
-start(glob.glob("raw_data_removed/*fold0*.tfrecord"),"v2/subsetfold0.h5")
-start(glob.glob("raw_data_removed/*fold1*.tfrecord"),"v2/subsetfold1.h5")
-start(glob.glob("raw_data_removed/*fold2*.tfrecord"),"v2/subsetfold2.h5")
-start(glob.glob("raw_data_removed/*fold3*.tfrecord"),"v2/subsetfold3.h5")
+start(glob.glob("raw_data/*fold0*.tfrecord"),"v2/fold0.h5")
+start(glob.glob("raw_data/*fold1*.tfrecord"),"v2/fold1.h5")
+start(glob.glob("raw_data/*fold2*.tfrecord"),"v2/fold2.h5")
+start(glob.glob("raw_data/*fold3*.tfrecord"),"v2/fold3.h5")
 # start(glob.glob("raw_data/*fold0*.tfrecord"),"test.h5")
 
 # for key in extra_info.keys():
