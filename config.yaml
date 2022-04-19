@@ -17,7 +17,7 @@ scheduler:
   - 120
   gamma: 0.1
 log_dir: None
-max_early_stop: 40
+max_early_stop: 20
 img_keys:
 - AOD047
 - AOD055
@@ -68,9 +68,9 @@ label_keys:
 - education
 - health
 - Living Standards
-pos_keys:
 - lat
 - lon
-- name
+- year
+
 restore_weight: null
 

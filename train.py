@@ -10,7 +10,7 @@ import pandas as pd
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
-# from Models.gp import GaussianProcess
+from Models.gp import gp_model
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.AverageMeter import AverageMeter
 from Utils.clock import clock,Timer
@@ -105,7 +105,6 @@ def train(args):
     )
 
     model = Net(args).cuda()
-
     if args.restore_weight is not None:
         model.load_state_dict(torch.load(args.restore_weight))
     
@@ -119,39 +118,51 @@ def train(args):
     }
     
     early_stop = 0 #  early stop
+    gp = gp_model(sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01)
     for epoch in range(1, args.epochs+1):
+        gp.clear_training_params()
+        gp.clear_testing_params()
         model.train()
         _ = [metrics[k].reset() for k in metrics.keys()]
         losses = AverageMeter()
         for fea, lbl in train_loader:
-            fea_img = fea[0]
-            fea_num = fea[1]
+            img_data = fea[0]
+            num_data = fea[1]
             y = lbl["MPI3_fixed"].cuda()
-            y_hat = model(fea_img.cuda(), fea_num.cuda())
+            y_hat, fea = model(img_data.cuda(), num_data.cuda())
             loss = criterion(y_hat, y)
             loss.backward()
             losses.update(loss)
             optimizer.step()
             optimizer.zero_grad()
             acc = {k: metrics[k](y_hat, y) for k in metrics.keys()}
+            gp.update_training_params(
+                fea.detach().cpu(), 
+                lbl['year'],
+                np.stack([lbl['lat'], lbl['lon']],-1),  #  60x2
+                y.cpu()
+            )
+            
+
         acc = {k: metrics[k].compute() for k in metrics.keys()}
         writer.add_scalar("Train/loss", losses.avg(), epoch)
         writer.add_scalar("Train/r2", acc['r2'], epoch)
         writer.add_scalar("Train/mse", acc['mse'], epoch)
-        logging.info(f"[train] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
+        logging.info(f"[train] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} mse={acc['mse']:.4f} mape:{acc['mape']:.3f}")
 
         if epoch%3==0:
             with torch.no_grad():
                 _ = [metrics[k].reset() for k in metrics.keys()]
                 losses = AverageMeter()
                 for fea, lbl in valid_loader:
-                    fea_img = fea[0]
-                    fea_num = fea[1]
+                    img_data = fea[0]
+                    num_data = fea[1]
                     y = lbl["MPI3_fixed"].cuda()
-                    y_hat = model(fea_img.cuda(), fea_num.cuda())
+                    y_hat, fea = model(img_data.cuda(), num_data.cuda())
                     loss = criterion(y_hat, y)
                     losses.update(loss)
                     acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+                    
                 acc = {k: metrics[k].compute() for k in metrics.keys()}
                 if acc[args.best_acc["name"]]<args.best_acc["value"]:
                     args.best_acc["value"] = float(acc[args.best_acc["name"]])
@@ -171,53 +182,107 @@ def train(args):
                 writer.add_scalar("Validate/mse", acc['mse'], epoch)
                 logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
                 logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
-            
-        scheduler.step()
         
         
+
         if epoch%10==0:
+            gp.clear_testing_params()
             with torch.no_grad():
                 training_weight = model.state_dict()
                 if args.best_weight_path is not None:
                     model.load_state_dict(torch.load(args.best_weight_path))
                 _ = [metrics[k].reset() for k in metrics.keys()]
+                test_y = []
+                pred_y = []
                 for fea, lbl in test_loader:
-                    fea_img = fea[0]
-                    fea_num = fea[1]
+                    img_data = fea[0]
+                    num_data = fea[1]
                     y = lbl["MPI3_fixed"].cuda()
-                    y_hat = model(fea_img.cuda(), fea_num.cuda())
-                    acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
-                acc = {k: metrics[k].compute() for k in metrics.keys()}
-                writer.add_scalar("Test/r2", acc['r2'], epoch)
-                writer.add_scalar("Test/mse", acc['mse'], epoch)
+                    y_hat, fea = model(img_data.cuda(), num_data.cuda())
+                    gp.update_testing_params(
+                        fea.detach().cpu().numpy(), 
+                        lbl['year'], 
+                        np.stack([lbl['lat'], lbl['lon']],-1),
+                        y.cpu()
+                    )
+                    test_y.append(y)
+                    pred_y.append(y_hat)
+
+                test_y = torch.cat(test_y, dim=0)
+                pred_y = torch.cat(pred_y, dim=0)
+                y_gp = gp.gp_run(
+                    epoch,
+                    model.state_dict()["fclayer.3.weight"].cpu(),
+                    model.state_dict()["fclayer.3.bias"].cpu(),
+                    args.log_dir,
+                ).cuda()
+                r2 = torchmetrics.functional.r2_score(pred_y, test_y).cpu().numpy()
+                mse = torchmetrics.functional.mean_squared_error(pred_y, test_y).cpu().numpy()
+                r2_gp = torchmetrics.functional.r2_score(y_gp, test_y).cpu().numpy()
+                mse_gp = torchmetrics.functional.mean_squared_error(y_gp, test_y).cpu().numpy()
+
+                writer.add_scalar("Test/r2", r2, epoch)
+                writer.add_scalar("Test/r2_gp", r2_gp, epoch)
+                writer.add_scalar("Test/mse", mse, epoch)
+                writer.add_scalar("Test/mse_gp", mse_gp, epoch)
                 logging.info(f"[test] Testing with {args.best_weight_path}")
-                logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
+                logging.info(f"[test] r2_old={r2:.3f} mse_old={mse:.4f}")
+                logging.info(f"[test] r2={r2_gp:.3f} mse={mse_gp:.4f}")
                 model.load_state_dict(training_weight)
-    
-    # 
+         
+                
+
+                
+        scheduler.step()
+
+
+    gp.clear_testing_params()
     with torch.no_grad():
         res = {"name":[],"y":[],"y_hat":[]}
         logging.info(f"[test] Finish training or trigger early stop")
         if args.best_weight_path is not None:
-            # logging.info(f"[test] loading best weight: {args.best_weight_path}")
             model.load_state_dict(torch.load(args.best_weight_path))
-        _ = [metrics[k].reset() for k in metrics.keys()]
+        test_y = []
+        pred_y = []
         for fea, lbl in test_loader:
-            fea_img = fea[0]
-            fea_num = fea[1]
+            img_data = fea[0]
+            num_data = fea[1]
             y = lbl["MPI3_fixed"].cuda()
-            y_hat = model(fea_img.cuda(), fea_num.cuda())
-            acc = {key: metrics[key](y_hat, y) for key in metrics.keys()}
+            y_hat, fea = model(img_data.cuda(), num_data.cuda())
             res["name"].extend(lbl["name"])
-            res["y"].extend(y.cpu().numpy())
-            res["y_hat"].extend(y_hat.cpu().numpy())
-        acc = {k: metrics[k].compute() for k in metrics.keys()}
-        writer.add_scalar("Test/r2", acc['r2'], epoch)
-        writer.add_scalar("Test/mse", acc['mse'], epoch)
+            res["y"].extend(y.cpu())
+            res["y_hat"].extend(y_hat.cpu())
+            gp.update_testing_params(
+                fea.detach().cpu().numpy(), 
+                lbl['year'], 
+                np.stack([lbl['lat'], lbl['lon']],-1),
+                y.cpu()
+            )
+            test_y.append(y)
+            pred_y.append(y_hat)
+
+        test_y = torch.cat(test_y, dim=0)
+        pred_y = torch.cat(pred_y, dim=0)
+        y_gp = gp.gp_run(
+            epoch,
+            model.state_dict()["fclayer.3.weight"].cpu(),
+            model.state_dict()["fclayer.3.bias"].cpu(),
+            args.log_dir,
+        ).cuda()
+        r2 = torchmetrics.functional.r2_score(pred_y, test_y).cpu().numpy()
+        mse = torchmetrics.functional.mean_squared_error(pred_y, test_y).cpu().numpy()
+        r2_gp = torchmetrics.functional.r2_score(y_gp, test_y).cpu().numpy()
+        mse_gp = torchmetrics.functional.mean_squared_error(y_gp, test_y).cpu().numpy()
+        
+        writer.add_scalar("Test/r2", r2, epoch)
+        writer.add_scalar("Test/r2_gp", r2_gp, epoch)
+        writer.add_scalar("Test/mse", mse, epoch)
+        writer.add_scalar("Test/mse_gp", mse_gp, epoch)
         logging.info(f"[test] Testing with {args.best_weight_path}")
-        logging.info(f"[test] r2={acc['r2']:.3f} rmse={acc['mse']:.4f} mape={acc['mape']:.3f}")
-        res = pd.DataFrame(res)
-        res.to_csv(f"{args.log_dir}/test_result.csv")
+        logging.info(f"[test] r2_old={r2:.3f} rmse_old={mse:.4f}")
+        logging.info(f"[test] r2={r2_gp:.3f} mse={mse_gp:.4f}")
+        # res = pd.DataFrame(res)
+        # res.to_csv(f"{args.log_dir}/test_result.csv")
 
     
     save_args(args)
