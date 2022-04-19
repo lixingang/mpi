@@ -21,16 +21,16 @@
 # echo "END"
 
 echo "START"
-python train.py --seed=10 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=20 --gpu=0 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=30 --gpu=1 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=40 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=50 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=60 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=70 --gpu=1 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=80 --gpu=0 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=90 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 1s
-python train.py --seed=100 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3 & sleep 1s
+python train.py --seed=10 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=20 --gpu=0 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=30 --gpu=1 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=40 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=50 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=60 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=70 --gpu=1 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=80 --gpu=0 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=90 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3  & sleep 2s
+python train.py --seed=100 --gpu=2 --model_name=mpi_v3 --data_dir=Data/v3 & sleep 2s
 wait
 
 # python train.py --seed 10  --gpu 2 --model_name=mpi_v4 --data_dir=Data/v4  & sleep 1s
