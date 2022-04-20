@@ -93,13 +93,13 @@ class gp_model(GaussianProcess):
         self.model_weight = None
         self.model_bias = None
 
-    def update_training_params(self, feat, year, loc, y):   
+    def append_training_params(self, feat, year, loc, y):   
         self.train_feat.append(feat)
         self.train_year.append(year)
         self.train_loc.append(loc)
         self.train_y.append(y)
 
-    def update_testing_params(self, feat, year, loc, y):
+    def append_testing_params(self, feat, year, loc, y):
         self.test_feat.append(feat)
         self.test_year.append(year)
         self.test_loc.append(loc)
@@ -122,20 +122,7 @@ class gp_model(GaussianProcess):
             model_weight, model_bias
         )
 
-        gp_params = {
-            "train_feat":train_feat,
-            "train_year":train_year,
-            "train_loc":train_loc,
-            "train_y":train_y,
-            "test_feat":test_feat,
-            "test_loc":test_loc,
-            "test_year":test_year,
-            "model_weight":model_weight,
-            "model_bias":model_bias,
-
-        }
-        if not log_dir is None:
-            torch.save(gp_params,f"{log_dir}/gp_params_ep{epoch}.pth")
+        
         # self.train_feat = []
         # self.train_year = []
         # self.train_loc = []
@@ -147,17 +134,42 @@ class gp_model(GaussianProcess):
         # self.model_bias = None
 
         return torch.squeeze(gp_pred)
+    def save(self, path):
+        gp_params = {
+            "train_feat":self.train_feat,
+            "train_year":self.train_year,
+            "train_loc":self.train_loc,
+            "train_y":self.train_y,
+            # "test_feat":self.test_feat,
+            # "test_loc":self.test_loc,
+            # "test_year":self.test_year,
+            # "model_weight":self.model_weight,
+            # "model_bias":self.model_bias,
 
+        }
+        torch.save(gp_params,path)
 
-    def clear_testing_params(self):
-
+    def restore(self, path):
+        params = torch.load(path)
+        self.train_feat = params["train_feat"]
+        self.train_year = params["train_year"]
+        self.train_loc = params["train_loc"]
+        self.train_y = params["train_y"]
         self.test_feat = []
         self.test_loc = []
         self.test_year = []
         self.test_y = []
 
-    def clear_training_params(self):
+    def clear_params(self):
+
+        self.test_feat = []
+        self.test_loc = []
+        self.test_year = []
+        self.test_y = []
         self.train_feat = []
         self.train_year = []
         self.train_loc = []
         self.train_y = []
+
+    # def clear_training_params(self):
+        
