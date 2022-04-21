@@ -10,7 +10,6 @@ class mpi_dataset():
         self.datalist = datalist
         self.img_keys = args.img_keys
         self.num_keys = args.num_keys
-        self.pos_keys = args.pos_keys
         self.label_keys = args.label_keys
  
     def __getitem__(self, i):

@@ -17,23 +17,23 @@ class Net(nn.Module):
             nn.Linear(len(args.img_keys)*10, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
         )
         self.Lnet2 = nn.Sequential(
             nn.Linear(len(args.num_keys), 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
         )
         self.fclayer = nn.Sequential(
-            nn.Linear(1024, 1024),
-            nn.BatchNorm1d(1024),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(1024, 1),
+            nn.Linear(512, 1),
             # nn.Softmax(dim=1)
         )
         
@@ -42,11 +42,11 @@ class Net(nn.Module):
         img = img.view(img.shape[0],-1)
         img = self.Lnet1(img.float())
         num = self.Lnet2(num.float())
-        x = torch.cat((img,num),1)
-        x = self.fclayer(x)
+        fea = torch.cat((img,num),1)
+        x = self.fclayer(fea)
         # print(x)
         
-        return torch.squeeze(x)
+        return torch.squeeze(x), fea
 
         
 

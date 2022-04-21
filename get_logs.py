@@ -29,10 +29,11 @@ def parse_log(path):
     line = lines[-1].strip()
     pattern = re.compile(r'(?<=r2.)\d+\.?\d*')
     r2 = pattern.findall(line)[0]
-    pattern = re.compile(r'(?<=rmse.)\d+\.?\d*')
+    pattern = re.compile(r'(?<=mse.)\d+\.?\d*')
     rmse = pattern.findall(line)[0]
-    pattern = re.compile(r'(?<=mape.)\d+\.?\d*')
-    mape = pattern.findall(line)[0]
+    # pattern = re.compile(r'(?<=mape.)\d+\.?\d*')
+    # mape = pattern.findall(line)[0]
+    mape=0
     f.close()
     return float(r2),float(rmse), float(mape)
 

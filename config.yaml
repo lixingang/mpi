@@ -1,11 +1,13 @@
 model_name: mpi_v3
 data_dir: Data/v3
+run_gp: True
 batch_size: 60
 seed: 0
 best_acc:
   name: mse
   value: 99.
 best_weight_path: null
+best_gp_path: null
 epochs: 300
 gpu: '0'
 
@@ -17,7 +19,7 @@ scheduler:
   - 120
   gamma: 0.1
 log_dir: None
-max_early_stop: 40
+max_early_stop: 20
 img_keys:
 - AOD047
 - AOD055
@@ -68,9 +70,9 @@ label_keys:
 - education
 - health
 - Living Standards
-pos_keys:
 - lat
 - lon
-- name
+- year
+
 restore_weight: null
 
