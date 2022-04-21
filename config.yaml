@@ -1,6 +1,6 @@
 model_name: mpi_v3
 data_dir: Data/v3
-run_gp: False
+run_gp: True
 batch_size: 60
 seed: 0
 best_acc:

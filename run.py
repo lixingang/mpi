@@ -101,10 +101,12 @@ def _train(args, epoch, model, loader, gp=None):
     if epoch%20==0:
         logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
 
-    return model, acc, gp
+    return model.state_dict(), acc, gp
  
-def _validation(args, epoch, model, loader, gp=None):
+def _validation(args, epoch, weight, loader, gp=None):
     global early_stop
+    model = Net(args).cuda()
+    model.load_state_dict(weight)
     with torch.no_grad():
         criterion = HEMLoss(0)
         losses = AverageMeter()
@@ -146,20 +148,19 @@ def _validation(args, epoch, model, loader, gp=None):
         acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
 
         
-        logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} rmse={acc['mse']:.4f} ")
+        logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} mse={acc['mse']:.4f} ")
         
         
     return acc
 
-def _test(args, epoch, model, loader, gp=None):
+def _test(args, epoch, loader, gp=None):
     with torch.no_grad():
         test_model = Net(args).cuda()
 
         # restore the parameters
-        if args.best_weight_path is not None:
-            test_model.load_state_dict(torch.load(args.best_weight_path))
-            if gp:
-                gp.restore(args.best_weight_path.replace("ep","gp_ep"))
+        test_model.load_state_dict(torch.load(args.best_weight_path))
+        if gp:
+            gp.restore(args.best_gp_path)
         y = []
         y_hat = []
         
@@ -195,6 +196,9 @@ def _test(args, epoch, model, loader, gp=None):
         logging.info(f"[test] Testing with {args.best_weight_path}")
         logging.info(f"[test] r2={r2:.3f} mse={mse:.4f}")
         
+        df = pd.DataFrame({"y":y.cpu().numpy(),"y_hat":y_hat.cpu().numpy()})
+        df.to_csv(os.path.join(args.log_dir,"predict.csv"))
+
         # model.load_state_dict(training_weight)
 
         return acc 
@@ -256,7 +260,7 @@ def run(args):
         '''
         training
         '''
-        model, acc, gp = _train(args, epoch, model, train_loader, gp)
+        weight, acc, gp = _train(args, epoch, model, train_loader, gp)
 
         writer.add_scalar("Train/loss", acc['loss'], epoch)
         writer.add_scalar("Train/r2", acc['r2'], epoch)
@@ -266,12 +270,11 @@ def run(args):
             '''
             validation
             '''
-            acc = _validation(args, epoch, model, valid_loader, gp)
+            acc = _validation(args, epoch, weight, valid_loader, gp)
             if acc[args.best_acc["name"]]<args.best_acc["value"]:
                 args.best_acc["value"] = float(acc[args.best_acc["name"]])
                 os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
-                filename= f"ep{epoch}.pth"
-                args.best_weight_path = os.path.join(args.log_dir, filename)
+                args.best_weight_path = os.path.join(args.log_dir, f"ep{epoch}.pth")
                 torch.save(model.state_dict(), args.best_weight_path)
                 if gp:
                     args.best_gp_path = args.best_weight_path.replace("ep","gp_ep")
@@ -295,7 +298,7 @@ def run(args):
             '''
             testing
             '''
-            acc = _test(args, epoch, model, test_loader, gp)
+            acc = _test(args, epoch, test_loader, gp)
             writer.add_scalar("Test/r2", acc['r2'], epoch)
             writer.add_scalar("Test/mse", acc['mse'], epoch)
                 
@@ -304,7 +307,7 @@ def run(args):
     '''
     final test
     '''
-    acc = _test(args, epoch, model, test_loader, gp)
+    acc = _test(args, epoch, test_loader, gp)
     writer.add_scalar("Test/r2", acc['r2'], epoch)
     writer.add_scalar("Test/mse", acc['mse'], epoch)
         
