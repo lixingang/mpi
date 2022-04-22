@@ -7,6 +7,8 @@ from torch.utils.tensorboard import SummaryWriter
 import torchmetrics
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
@@ -25,7 +27,6 @@ for key in config:
 parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
 args.log_dir = os.path.join("Logs", args.model_name, datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
-
 setup_seed(args.seed)
 
 def logging_setting(args):
@@ -103,10 +104,10 @@ def _train(args, epoch, model, loader, gp=None):
 
     return model.state_dict(), acc, gp
  
-def _validation(args, epoch, weight, loader, gp=None):
+def _validation(args, epoch, training_weight, loader, gp=None):
     global early_stop
-    model = Net(args).cuda()
-    model.load_state_dict(weight)
+    valid_model = Net(args).cuda()
+    valid_model.load_state_dict(training_weight)
     with torch.no_grad():
         criterion = HEMLoss(0)
         losses = AverageMeter()
@@ -116,7 +117,7 @@ def _validation(args, epoch, weight, loader, gp=None):
             img_data = fea[0]
             num_data = fea[1]
             _y = lbl["MPI3_fixed"].cuda()
-            _y_hat, fea = model(img_data.cuda(), num_data.cuda())
+            _y_hat, fea = valid_model(img_data.cuda(), num_data.cuda())
             loss = criterion(_y_hat, _y)
             losses.update(loss)
             if gp:
@@ -124,7 +125,6 @@ def _validation(args, epoch, weight, loader, gp=None):
                     fea.detach().cpu().numpy(), 
                     lbl['year'], 
                     np.stack([lbl['lat'], lbl['lon']],-1),
-                    _y.cpu()
                 )
             y.append(_y)
             y_hat.append(_y_hat)
@@ -135,9 +135,8 @@ def _validation(args, epoch, weight, loader, gp=None):
         if gp:
             y = gp.gp_run(
                 epoch,
-                model.state_dict()["fclayer.3.weight"].cpu(),
-                model.state_dict()["fclayer.3.bias"].cpu(),
-                args.log_dir,
+                valid_model.state_dict()["fclayer.3.weight"].cpu(),
+                valid_model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
 
 
@@ -174,7 +173,6 @@ def _test(args, epoch, loader, gp=None):
                     fea.detach().cpu().numpy(), 
                     lbl['year'], 
                     np.stack([lbl['lat'], lbl['lon']],-1),
-                    _y.cpu()
                 )
             y.append(_y)
             y_hat.append(_y_hat)
@@ -187,7 +185,6 @@ def _test(args, epoch, loader, gp=None):
                 epoch,
                 test_model.state_dict()["fclayer.3.weight"].cpu(),
                 test_model.state_dict()["fclayer.3.bias"].cpu(),
-                args.log_dir,
             ).cuda()
         r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
         mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
@@ -243,10 +240,12 @@ def run(args):
         drop_last=False,
     )
 
-    model = Net(args).cuda()
+    train_model = Net(args).cuda()
     if args.restore_weight is not None:
-        model.load_state_dict(torch.load(args.restore_weight))
-    
+        train_model.load_state_dict(torch.load(args.restore_weight))
+    criterion = HEMLoss(0)
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, train_model.parameters()),lr=args.init_lr)
+    scheduler = MultiStepLR(optimizer, **args.scheduler)
     early_stop = 0 #  early stop
 
     gp = None
@@ -260,7 +259,48 @@ def run(args):
         '''
         training
         '''
-        weight, acc, gp = _train(args, epoch, model, train_loader, gp)
+        # training_weight, acc, gp = _train(args, epoch, model, train_loader, gp)
+        train_model.train()
+    
+        losses = AverageMeter()
+        y = []
+        y_hat = []
+        for fea, lbl in train_loader:
+            img_data = fea[0]
+            num_data = fea[1]
+            _y = lbl["MPI3_fixed"].cuda()
+            _y_hat, fea = train_model(img_data.cuda(), num_data.cuda())
+            loss = criterion(_y_hat, _y)
+            loss.backward()
+            losses.update(loss)
+            optimizer.step()
+            optimizer.zero_grad()
+
+            y.append(_y)
+            y_hat.append(_y_hat)
+            
+            if gp:
+                gp.append_training_params(
+                    fea.detach().cpu(), 
+                    lbl['year'],
+                    np.stack([lbl['lat'], lbl['lon']],-1),  #  60x2
+                    _y.cpu()
+                )
+
+        y = torch.cat(y, dim=0).detach()
+        y_hat = torch.cat(y_hat, dim=0).detach()
+
+        r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
+        mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
+        acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
+        logging.info(f"[train] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f}")
+
+        scheduler.step()
+        if epoch%20==0:
+            logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
+
+
+        ###
 
         writer.add_scalar("Train/loss", acc['loss'], epoch)
         writer.add_scalar("Train/r2", acc['r2'], epoch)
@@ -270,12 +310,12 @@ def run(args):
             '''
             validation
             '''
-            acc = _validation(args, epoch, weight, valid_loader, gp)
+            acc = _validation(args, epoch, train_model.state_dict(), valid_loader, gp)
             if acc[args.best_acc["name"]]<args.best_acc["value"]:
                 args.best_acc["value"] = float(acc[args.best_acc["name"]])
                 os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
                 args.best_weight_path = os.path.join(args.log_dir, f"ep{epoch}.pth")
-                torch.save(model.state_dict(), args.best_weight_path)
+                torch.save(train_model.state_dict(), args.best_weight_path)
                 if gp:
                     args.best_gp_path = args.best_weight_path.replace("ep","gp_ep")
                     gp.save(args.best_gp_path)
@@ -317,6 +357,7 @@ def run(args):
     
     save_args(args)
     return "OK"
+    
 
 
 

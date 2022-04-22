@@ -89,7 +89,6 @@ class gp_model(GaussianProcess):
         self.test_feat = []
         self.test_loc = []
         self.test_year = []
-        self.test_y = []
 
     def append_training_params(self, feat, year, loc, y):   
         self.train_feat.append(feat)
@@ -97,14 +96,13 @@ class gp_model(GaussianProcess):
         self.train_loc.append(loc)
         self.train_y.append(y)
 
-    def append_testing_params(self, feat, year, loc, y):
+    def append_testing_params(self, feat, year, loc):
         self.test_feat.append(feat)
         self.test_year.append(year)
         self.test_loc.append(loc)
-        self.test_y.append(y)
 
 
-    def gp_run(self, epoch, model_weight, model_bias, log_dir=None):
+    def gp_run(self, epoch, model_weight, model_bias,):
         train_feat = np.concatenate(self.train_feat, axis=0)
         train_year = np.concatenate(self.train_year, axis=0)
         train_loc = np.concatenate(self.train_loc, axis=0)
@@ -156,7 +154,7 @@ class gp_model(GaussianProcess):
         self.test_feat = []
         self.test_loc = []
         self.test_year = []
-        self.test_y = []
+        # self.test_y = []
          
 
     def clear_params(self):
@@ -164,7 +162,7 @@ class gp_model(GaussianProcess):
         self.test_feat = []
         self.test_loc = []
         self.test_year = []
-        self.test_y = []
+        # self.test_y = []
         self.train_feat = []
         self.train_year = []
         self.train_loc = []
