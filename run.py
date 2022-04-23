@@ -133,14 +133,11 @@ def _validation(args, epoch, training_weight, loader, gp=None):
         y_hat = torch.cat(y_hat, dim=0).detach() 
 
         if gp:
-            y = gp.gp_run(
+            y_hat = gp.gp_run(
                 epoch,
                 valid_model.state_dict()["fclayer.3.weight"].cpu(),
                 valid_model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
-
-
-        
 
         r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
         mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
@@ -162,10 +159,13 @@ def _test(args, epoch, loader, gp=None):
             gp.restore(args.best_gp_path)
         y = []
         y_hat = []
-        
+        names = []
+        lons = []
+        lats = []
         for fea, lbl in loader:
             img_data = fea[0]
             num_data = fea[1]
+            
             _y = lbl["MPI3_fixed"].cuda()
             _y_hat, fea = test_model(img_data.cuda(), num_data.cuda())
             if gp:
@@ -176,12 +176,14 @@ def _test(args, epoch, loader, gp=None):
                 )
             y.append(_y)
             y_hat.append(_y_hat)
-
-        y = torch.cat(y,dim=0).detach()
-        y_hat = torch.cat(y_hat, dim=0).detach()
+            names.extend(lbl['name'])
+            lons.extend(lbl['lon'].tolist())
+            lats.extend(lbl['lat'].tolist())
+        y = torch.cat(y, dim=0).detach()
+        y_hat = torch.cat(y_hat, dim=0).detach() 
 
         if gp:
-            y = gp.gp_run(
+            y_hat = gp.gp_run(
                 epoch,
                 test_model.state_dict()["fclayer.3.weight"].cpu(),
                 test_model.state_dict()["fclayer.3.bias"].cpu(),
@@ -193,7 +195,7 @@ def _test(args, epoch, loader, gp=None):
         logging.info(f"[test] Testing with {args.best_weight_path}")
         logging.info(f"[test] r2={r2:.3f} mse={mse:.4f}")
         
-        df = pd.DataFrame({"y":y.cpu().numpy(),"y_hat":y_hat.cpu().numpy()})
+        df = pd.DataFrame({"name":names, "y":y.cpu().tolist(), "y_hat":y_hat.cpu().tolist(), "lon":lons, "lat":lats,})
         df.to_csv(os.path.join(args.log_dir,"predict.csv"))
 
         # model.load_state_dict(training_weight)

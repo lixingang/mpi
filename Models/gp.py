@@ -89,6 +89,7 @@ class gp_model(GaussianProcess):
         self.test_feat = []
         self.test_loc = []
         self.test_year = []
+        # self.test_y = []
 
     def append_training_params(self, feat, year, loc, y):   
         self.train_feat.append(feat)

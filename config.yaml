@@ -19,7 +19,7 @@ scheduler:
   - 120
   gamma: 0.1
 log_dir: None
-max_early_stop: 20
+max_early_stop: 30
 img_keys:
 - AOD047
 - AOD055
@@ -63,6 +63,9 @@ num_keys:
 - pr_sum
 - water
 - DHSCLUST1
+- lat
+- lon
+- year
 label_keys:
 - MPI3_fixed
 - H
