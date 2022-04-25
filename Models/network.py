@@ -14,26 +14,26 @@ class Net(nn.Module):
         super().__init__()
         # self.Cnet = MobileNetV3_Small(in_channel=len(args.img_keys) , out_channel=128)
         self.Lnet1 = nn.Sequential(
-            nn.Linear(len(args.img_keys)*10, 512),
+            nn.Linear(len(args.img_keys)*20, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
         )
         self.Lnet2 = nn.Sequential(
             nn.Linear(len(args.num_keys), 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-        )
-        self.fclayer = nn.Sequential(
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 1),
+        )
+        self.fclayer = nn.Sequential(
+            nn.Linear(1024, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(inplace=True),
+            nn.Linear(1024, 1),
             # nn.Softmax(dim=1)
         )
         
@@ -43,6 +43,7 @@ class Net(nn.Module):
         img = self.Lnet1(img.float())
         num = self.Lnet2(num.float())
         fea = torch.cat((img,num),1)
+        # fea = img
         x = self.fclayer(fea)
         # print(x)
         

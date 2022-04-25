@@ -7,14 +7,14 @@ from torch.utils.tensorboard import SummaryWriter
 import torchmetrics
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
 from Models.network import Net
 from Models.gp import gp_model
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.AverageMeter import AverageMeter
-from Utils.clock import clock,Timer
-from Utils.setup_seed import setup_seed
 from Utils.ParseYAML import ParseYAML
 
 
@@ -26,7 +26,14 @@ parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
 args.log_dir = os.path.join("Logs", args.model_name, datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
 
-setup_seed(args.seed)
+'''
+setup the random seed
+'''
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed_all(args.seed)
+np.random.seed(args.seed)
+random.seed(args.seed)
+torch.backends.cudnn.deterministic = True
 
 def logging_setting(args):
     os.makedirs(args.log_dir, exist_ok=True)
@@ -59,11 +66,9 @@ def split_train_test(data_list, ratio=[0.6,0.2,0.2]):
         return data_list[:slice1],data_list[slice1:slice2],data_list[slice2:]
 
 
-def _train(args, epoch, model, loader, gp=None):
+def _train_epoch(args, epoch, model, loader, optimizer, gp=None):
     model.train()
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),lr=args.init_lr)
-    scheduler = MultiStepLR(optimizer, **args.scheduler)
     losses = AverageMeter()
     y = []
     y_hat = []
@@ -82,12 +87,13 @@ def _train(args, epoch, model, loader, gp=None):
         y_hat.append(_y_hat)
         
         if gp:
-            gp.append_training_params(
-                fea.detach().cpu(), 
-                lbl['year'],
-                np.stack([lbl['lat'], lbl['lon']],-1),  #  60x2
-                _y.cpu()
-            )
+            gp_training_params = {
+                "feat":fea.detach().cpu(),
+                "year":lbl['year'],
+                "loc":np.stack([lbl['lat'], lbl['lon']],-1), 
+                "y": _y.cpu()
+            }
+            gp.append_training_params(**gp_training_params)
 
     y = torch.cat(y, dim=0).detach()
     y_hat = torch.cat(y_hat, dim=0).detach()
@@ -97,16 +103,14 @@ def _train(args, epoch, model, loader, gp=None):
     acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
     logging.info(f"[train] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f}")
 
-    scheduler.step()
-    if epoch%20==0:
-        logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
+    
 
-    return model.state_dict(), acc, gp
+    return acc, gp
  
-def _validation(args, epoch, weight, loader, gp=None):
+def _valid_epoch(args, epoch, training_weight, loader, gp=None):
     global early_stop
-    model = Net(args).cuda()
-    model.load_state_dict(weight)
+    valid_model = Net(args).cuda()
+    valid_model.load_state_dict(training_weight)
     with torch.no_grad():
         criterion = HEMLoss(0)
         losses = AverageMeter()
@@ -116,7 +120,7 @@ def _validation(args, epoch, weight, loader, gp=None):
             img_data = fea[0]
             num_data = fea[1]
             _y = lbl["MPI3_fixed"].cuda()
-            _y_hat, fea = model(img_data.cuda(), num_data.cuda())
+            _y_hat, fea = valid_model(img_data.cuda(), num_data.cuda())
             loss = criterion(_y_hat, _y)
             losses.update(loss)
             if gp:
@@ -124,7 +128,6 @@ def _validation(args, epoch, weight, loader, gp=None):
                     fea.detach().cpu().numpy(), 
                     lbl['year'], 
                     np.stack([lbl['lat'], lbl['lon']],-1),
-                    _y.cpu()
                 )
             y.append(_y)
             y_hat.append(_y_hat)
@@ -133,15 +136,11 @@ def _validation(args, epoch, weight, loader, gp=None):
         y_hat = torch.cat(y_hat, dim=0).detach() 
 
         if gp:
-            y = gp.gp_run(
+            y_hat = gp.gp_run(
                 epoch,
-                model.state_dict()["fclayer.3.weight"].cpu(),
-                model.state_dict()["fclayer.3.bias"].cpu(),
-                args.log_dir,
+                valid_model.state_dict()["fclayer.3.weight"].cpu(),
+                valid_model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
-
-
-        
 
         r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
         mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
@@ -153,7 +152,7 @@ def _validation(args, epoch, weight, loader, gp=None):
         
     return acc
 
-def _test(args, epoch, loader, gp=None):
+def _test_epoch(args, epoch, loader, gp=None):
     with torch.no_grad():
         test_model = Net(args).cuda()
 
@@ -163,10 +162,13 @@ def _test(args, epoch, loader, gp=None):
             gp.restore(args.best_gp_path)
         y = []
         y_hat = []
-        
+        names = []
+        lons = []
+        lats = []
         for fea, lbl in loader:
             img_data = fea[0]
             num_data = fea[1]
+            
             _y = lbl["MPI3_fixed"].cuda()
             _y_hat, fea = test_model(img_data.cuda(), num_data.cuda())
             if gp:
@@ -174,20 +176,20 @@ def _test(args, epoch, loader, gp=None):
                     fea.detach().cpu().numpy(), 
                     lbl['year'], 
                     np.stack([lbl['lat'], lbl['lon']],-1),
-                    _y.cpu()
                 )
             y.append(_y)
             y_hat.append(_y_hat)
-
-        y = torch.cat(y,dim=0).detach()
-        y_hat = torch.cat(y_hat, dim=0).detach()
+            names.extend(lbl['name'])
+            lons.extend(lbl['lon'].tolist())
+            lats.extend(lbl['lat'].tolist())
+        y = torch.cat(y, dim=0).detach()
+        y_hat = torch.cat(y_hat, dim=0).detach() 
 
         if gp:
-            y = gp.gp_run(
+            y_hat = gp.gp_run(
                 epoch,
                 test_model.state_dict()["fclayer.3.weight"].cpu(),
                 test_model.state_dict()["fclayer.3.bias"].cpu(),
-                args.log_dir,
             ).cuda()
         r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
         mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
@@ -196,7 +198,7 @@ def _test(args, epoch, loader, gp=None):
         logging.info(f"[test] Testing with {args.best_weight_path}")
         logging.info(f"[test] r2={r2:.3f} mse={mse:.4f}")
         
-        df = pd.DataFrame({"y":y.cpu().numpy(),"y_hat":y_hat.cpu().numpy()})
+        df = pd.DataFrame({"name":names, "y":y.cpu().tolist(), "y_hat":y_hat.cpu().tolist(), "lon":lons, "lat":lats,})
         df.to_csv(os.path.join(args.log_dir,"predict.csv"))
 
         # model.load_state_dict(training_weight)
@@ -243,39 +245,46 @@ def run(args):
         drop_last=False,
     )
 
-    model = Net(args).cuda()
+    train_model = Net(args).cuda()
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, train_model.parameters()),lr=args.init_lr)
+    scheduler = MultiStepLR(optimizer, **args.scheduler)
+
     if args.restore_weight is not None:
-        model.load_state_dict(torch.load(args.restore_weight))
+        train_model.load_state_dict(torch.load(args.restore_weight))
     
     early_stop = 0 #  early stop
-
     gp = None
     if args.run_gp:
         gp = gp_model(sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01)
 
     for epoch in range(1, args.epochs+1):
-        if gp:
-            gp.clear_params()
-        
-        '''
-        training
-        '''
-        weight, acc, gp = _train(args, epoch, model, train_loader, gp)
+        if epoch%1==0:
+            '''
+            training
+            '''
+            if gp:
+                gp.clear_params()
+            acc, gp = _train_epoch(args, epoch, train_model, train_loader, optimizer, gp)
+            
+                
 
-        writer.add_scalar("Train/loss", acc['loss'], epoch)
-        writer.add_scalar("Train/r2", acc['r2'], epoch)
-        writer.add_scalar("Train/mse", acc['mse'], epoch)
+            
+            
+
+            writer.add_scalar("Train/loss", acc['loss'], epoch)
+            writer.add_scalar("Train/r2", acc['r2'], epoch)
+            writer.add_scalar("Train/mse", acc['mse'], epoch)
         
         if epoch%5==0:
             '''
             validation
             '''
-            acc = _validation(args, epoch, weight, valid_loader, gp)
+            acc = _valid_epoch(args, epoch, train_model.state_dict(), valid_loader, gp)
             if acc[args.best_acc["name"]]<args.best_acc["value"]:
                 args.best_acc["value"] = float(acc[args.best_acc["name"]])
                 os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
                 args.best_weight_path = os.path.join(args.log_dir, f"ep{epoch}.pth")
-                torch.save(model.state_dict(), args.best_weight_path)
+                torch.save(train_model.state_dict(), args.best_weight_path)
                 if gp:
                     args.best_gp_path = args.best_weight_path.replace("ep","gp_ep")
                     gp.save(args.best_gp_path)
@@ -294,20 +303,25 @@ def run(args):
             writer.add_scalar("Validate/r2", acc['r2'], epoch)
             writer.add_scalar("Validate/mse", acc['mse'], epoch)
             
-
+        if epoch%5==0:
             '''
             testing
             '''
-            acc = _test(args, epoch, test_loader, gp)
+            acc = _test_epoch(args, epoch, test_loader, gp)
             writer.add_scalar("Test/r2", acc['r2'], epoch)
             writer.add_scalar("Test/mse", acc['mse'], epoch)
+
+
+        scheduler.step()
+        if epoch%20==0:
+            logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
                 
          
    
     '''
     final test
     '''
-    acc = _test(args, epoch, test_loader, gp)
+    acc = _test_epoch(args, epoch, test_loader, gp)
     writer.add_scalar("Test/r2", acc['r2'], epoch)
     writer.add_scalar("Test/mse", acc['mse'], epoch)
         
@@ -317,6 +331,7 @@ def run(args):
     
     save_args(args)
     return "OK"
+    
 
 
 
