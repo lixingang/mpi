@@ -15,8 +15,6 @@ from Models.network import Net
 from Models.gp import gp_model
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.AverageMeter import AverageMeter
-from Utils.clock import clock,Timer
-from Utils.setup_seed import setup_seed
 from Utils.ParseYAML import ParseYAML
 
 
@@ -27,7 +25,15 @@ for key in config:
 parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
 args.log_dir = os.path.join("Logs", args.model_name, datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
-setup_seed(args.seed)
+
+'''
+setup the random seed
+'''
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed_all(args.seed)
+np.random.seed(args.seed)
+random.seed(args.seed)
+torch.backends.cudnn.deterministic = True
 
 def logging_setting(args):
     os.makedirs(args.log_dir, exist_ok=True)
@@ -60,11 +66,9 @@ def split_train_test(data_list, ratio=[0.6,0.2,0.2]):
         return data_list[:slice1],data_list[slice1:slice2],data_list[slice2:]
 
 
-def _train(args, epoch, model, loader, gp=None):
+def _train_epoch(args, epoch, model, loader, optimizer, gp=None):
     model.train()
     criterion = HEMLoss(0)
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),lr=args.init_lr)
-    scheduler = MultiStepLR(optimizer, **args.scheduler)
     losses = AverageMeter()
     y = []
     y_hat = []
@@ -83,12 +87,13 @@ def _train(args, epoch, model, loader, gp=None):
         y_hat.append(_y_hat)
         
         if gp:
-            gp.append_training_params(
-                fea.detach().cpu(), 
-                lbl['year'],
-                np.stack([lbl['lat'], lbl['lon']],-1),  #  60x2
-                _y.cpu()
-            )
+            gp_training_params = {
+                "feat":fea.detach().cpu(),
+                "year":lbl['year'],
+                "loc":np.stack([lbl['lat'], lbl['lon']],-1), 
+                "y": _y.cpu()
+            }
+            gp.append_training_params(**gp_training_params)
 
     y = torch.cat(y, dim=0).detach()
     y_hat = torch.cat(y_hat, dim=0).detach()
@@ -98,13 +103,11 @@ def _train(args, epoch, model, loader, gp=None):
     acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
     logging.info(f"[train] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f}")
 
-    scheduler.step()
-    if epoch%20==0:
-        logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
+    
 
-    return model.state_dict(), acc, gp
+    return acc, gp
  
-def _validation(args, epoch, training_weight, loader, gp=None):
+def _valid_epoch(args, epoch, training_weight, loader, gp=None):
     global early_stop
     valid_model = Net(args).cuda()
     valid_model.load_state_dict(training_weight)
@@ -149,7 +152,7 @@ def _validation(args, epoch, training_weight, loader, gp=None):
         
     return acc
 
-def _test(args, epoch, loader, gp=None):
+def _test_epoch(args, epoch, loader, gp=None):
     with torch.no_grad():
         test_model = Net(args).cuda()
 
@@ -243,76 +246,40 @@ def run(args):
     )
 
     train_model = Net(args).cuda()
-    if args.restore_weight is not None:
-        train_model.load_state_dict(torch.load(args.restore_weight))
-    criterion = HEMLoss(0)
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, train_model.parameters()),lr=args.init_lr)
     scheduler = MultiStepLR(optimizer, **args.scheduler)
-    early_stop = 0 #  early stop
 
+    if args.restore_weight is not None:
+        train_model.load_state_dict(torch.load(args.restore_weight))
+    
+    early_stop = 0 #  early stop
     gp = None
     if args.run_gp:
         gp = gp_model(sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01)
 
     for epoch in range(1, args.epochs+1):
-        if gp:
-            gp.clear_params()
-        
-        '''
-        training
-        '''
-        # training_weight, acc, gp = _train(args, epoch, model, train_loader, gp)
-        train_model.train()
-    
-        losses = AverageMeter()
-        y = []
-        y_hat = []
-        for fea, lbl in train_loader:
-            img_data = fea[0]
-            num_data = fea[1]
-            _y = lbl["MPI3_fixed"].cuda()
-            _y_hat, fea = train_model(img_data.cuda(), num_data.cuda())
-            loss = criterion(_y_hat, _y)
-            loss.backward()
-            losses.update(loss)
-            optimizer.step()
-            optimizer.zero_grad()
-
-            y.append(_y)
-            y_hat.append(_y_hat)
-            
+        if epoch%1==0:
+            '''
+            training
+            '''
             if gp:
-                gp.append_training_params(
-                    fea.detach().cpu(), 
-                    lbl['year'],
-                    np.stack([lbl['lat'], lbl['lon']],-1),  #  60x2
-                    _y.cpu()
-                )
+                gp.clear_params()
+            acc, gp = _train_epoch(args, epoch, train_model, train_loader, optimizer, gp)
+            
+                
 
-        y = torch.cat(y, dim=0).detach()
-        y_hat = torch.cat(y_hat, dim=0).detach()
+            
+            
 
-        r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
-        mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
-        acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
-        logging.info(f"[train] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f}")
-
-        scheduler.step()
-        if epoch%20==0:
-            logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
-
-
-        ###
-
-        writer.add_scalar("Train/loss", acc['loss'], epoch)
-        writer.add_scalar("Train/r2", acc['r2'], epoch)
-        writer.add_scalar("Train/mse", acc['mse'], epoch)
+            writer.add_scalar("Train/loss", acc['loss'], epoch)
+            writer.add_scalar("Train/r2", acc['r2'], epoch)
+            writer.add_scalar("Train/mse", acc['mse'], epoch)
         
         if epoch%5==0:
             '''
             validation
             '''
-            acc = _validation(args, epoch, train_model.state_dict(), valid_loader, gp)
+            acc = _valid_epoch(args, epoch, train_model.state_dict(), valid_loader, gp)
             if acc[args.best_acc["name"]]<args.best_acc["value"]:
                 args.best_acc["value"] = float(acc[args.best_acc["name"]])
                 os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
@@ -336,20 +303,25 @@ def run(args):
             writer.add_scalar("Validate/r2", acc['r2'], epoch)
             writer.add_scalar("Validate/mse", acc['mse'], epoch)
             
-
+        if epoch%5==0:
             '''
             testing
             '''
-            acc = _test(args, epoch, test_loader, gp)
+            acc = _test_epoch(args, epoch, test_loader, gp)
             writer.add_scalar("Test/r2", acc['r2'], epoch)
             writer.add_scalar("Test/mse", acc['mse'], epoch)
+
+
+        scheduler.step()
+        if epoch%20==0:
+            logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
                 
          
    
     '''
     final test
     '''
-    acc = _test(args, epoch, test_loader, gp)
+    acc = _test_epoch(args, epoch, test_loader, gp)
     writer.add_scalar("Test/r2", acc['r2'], epoch)
     writer.add_scalar("Test/mse", acc['mse'], epoch)
         

@@ -1,6 +1,6 @@
-model_name: mpi_v3
-data_dir: Data/v3
-run_gp: True
+model_name: v4_gp
+data_dir: Data/v4
+run_gp: False
 batch_size: 60
 seed: 0
 best_acc:
@@ -11,7 +11,7 @@ best_gp_path: null
 epochs: 300
 gpu: '0'
 
-init_lr: 0.0001
+init_lr: 0.001
 scheduler:
   milestones:
   - 20
