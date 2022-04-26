@@ -23,7 +23,7 @@ for key in config:
     parser.add_argument(f'--{key}', default=config[key],type=type(config[key]))
 parser.add_argument(f'--note', default="",type=str)
 args = parser.parse_args()
-args.log_dir = os.path.join("Logs", args.model_name, datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
+args.log_dir = os.path.join("Logs", args.data+"_"+args.tag, datetime.datetime.now().strftime('%b%d_%H-%M-%S'))
 
 '''
 setup the random seed
@@ -222,7 +222,7 @@ def run(args):
     logging.info(f"[Note] {args.note}")
     writer = SummaryWriter(log_dir=args.log_dir)
     
-    data_list = np.array(glob.glob(f"{args.data_dir}/*"))
+    data_list = np.array(glob.glob(f"Data/{args.data}/*"))
     train_list, valid_list, test_list = split_train_test(data_list, [0.7,0.15,0.15])
     with open(os.path.join(args.log_dir, 'train_valid_test.yaml'), 'w') as f:
         yaml.dump({"train_list":train_list.tolist(),"valid_list":valid_list.tolist(),"test_list":test_list.tolist(),}, f)

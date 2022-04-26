@@ -3,9 +3,9 @@ import glob,os
 import pandas as pd
 import argparse
 from Utils.parse import ParseYAML,parse_log
-def get_logs(model_name):
+def get_logs(logname):
     items = {"name":[],"seed":[],"r2":[],"rmse":[],"mape":[]}
-    log_list = glob.glob(f"Logs/{model_name}/*")
+    log_list = glob.glob(f"Logs/{logname}/*")
     for log in log_list:
         cfg = ParseYAML(os.path.join(log,"config.yaml"))
         r2,rmse,mape = parse_log(os.path.join(log,"run.log"))
@@ -21,12 +21,12 @@ def get_logs(model_name):
     items["mape"].append(np.average([float(i) for i in items["mape"]]))
     #print(items)
     df = pd.DataFrame(items,index=None)
-    df.to_csv(f"Logs/{model_name}/STAT_{model_name}.csv",index=False)
+    df.to_csv(f"Logs/{logname}/STAT_{logname}.csv",index=False)
 
 
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument(f'--model_name', default="",type=str)
+    parser.add_argument(f'--name', default="",type=str)
     args = parser.parse_args()
-    get_logs(args.model_name)
+    get_logs(args.name)
