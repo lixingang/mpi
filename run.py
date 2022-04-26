@@ -97,8 +97,8 @@ def _train_epoch(args, epoch, model, loader, optimizer, gp=None, writer=None):
     y = torch.cat(y, dim=0).detach()
     y_hat = torch.cat(y_hat, dim=0).detach()
 
-    r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
-    mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
+    r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy().item()
+    mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy().item()
     acc = {"train/loss":losses.avg(), "train/r2":r2, "train/mse":mse}
     logging.info(f"[train] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f}")
     if writer:
@@ -144,8 +144,8 @@ def _valid_epoch(args, epoch, training_weight, loader, gp=None, writer=None):
                 valid_model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
 
-        r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
-        mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
+        r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy().item()
+        mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy().item()
         acc = {"valid/loss":losses.avg(), "valid/r2":r2, "valid/mse":mse}
 
         
@@ -196,8 +196,8 @@ def _test_epoch(args, epoch, loader, gp=None, writer=None):
                 test_model.state_dict()["fclayer.3.weight"].cpu(),
                 test_model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
-        r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
-        mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
+        r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy().item()
+        mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy().item()
         acc = {"test/r2":r2, "test/mse":mse}
 
         logging.info(f"[test] Testing with {args.best_weight_path}")
