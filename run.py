@@ -15,8 +15,7 @@ from Models.network import Net
 from Models.gp import gp_model
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.AverageMeter import AverageMeter
-from Utils.ParseYAML import ParseYAML
-
+from Utils.parse import ParseYAML,parse_log
 
 config = ParseYAML("config.yaml")
 parser = argparse.ArgumentParser(description='Process some integers.')
@@ -66,7 +65,7 @@ def split_train_test(data_list, ratio=[0.6,0.2,0.2]):
         return data_list[:slice1],data_list[slice1:slice2],data_list[slice2:]
 
 
-def _train_epoch(args, epoch, model, loader, optimizer, gp=None):
+def _train_epoch(args, epoch, model, loader, optimizer, gp=None, writer=None):
     model.train()
     criterion = HEMLoss(0)
     losses = AverageMeter()
@@ -100,14 +99,17 @@ def _train_epoch(args, epoch, model, loader, optimizer, gp=None):
 
     r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
     mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
-    acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
+    acc = {"train/loss":losses.avg(), "train/r2":r2, "train/mse":mse}
     logging.info(f"[train] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f}")
-
+    if writer:
+        writer.add_scalar("Train/loss", acc['train/loss'], epoch)
+        writer.add_scalar("Train/r2", acc['train/r2'], epoch)
+        writer.add_scalar("Train/mse", acc['train/mse'], epoch)
     
-
-    return acc, gp
+    
+    return acc, gp 
  
-def _valid_epoch(args, epoch, training_weight, loader, gp=None):
+def _valid_epoch(args, epoch, training_weight, loader, gp=None, writer=None):
     global early_stop
     valid_model = Net(args).cuda()
     valid_model.load_state_dict(training_weight)
@@ -144,15 +146,18 @@ def _valid_epoch(args, epoch, training_weight, loader, gp=None):
 
         r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
         mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
-        acc = {"loss":losses.avg(), "r2":r2, "mse":mse}
+        acc = {"valid/loss":losses.avg(), "valid/r2":r2, "valid/mse":mse}
 
         
-        logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={acc['r2']:.3f} mse={acc['mse']:.4f} ")
-        
+        logging.info(f"[valid] epoch {epoch}/{args.epochs} r2={r2:.3f} mse={mse:.4f} ")
+        if writer:
+            writer.add_scalar("Valid/loss", acc['valid/loss'], epoch)
+            writer.add_scalar("Valid/r2", acc['valid/r2'], epoch)
+            writer.add_scalar("Valid/mse", acc['valid/mse'], epoch)
         
     return acc
 
-def _test_epoch(args, epoch, loader, gp=None):
+def _test_epoch(args, epoch, loader, gp=None, writer=None):
     with torch.no_grad():
         test_model = Net(args).cuda()
 
@@ -193,14 +198,18 @@ def _test_epoch(args, epoch, loader, gp=None):
             ).cuda()
         r2 = torchmetrics.functional.r2_score(y_hat, y).cpu().numpy()
         mse = torchmetrics.functional.mean_squared_error(y_hat, y).cpu().numpy()
-        acc = {"r2":r2, "mse":mse}
+        acc = {"test/r2":r2, "test/mse":mse}
 
         logging.info(f"[test] Testing with {args.best_weight_path}")
         logging.info(f"[test] r2={r2:.3f} mse={mse:.4f}")
+        if writer:
+            writer.add_scalar("Test/r2", acc['test/r2'], epoch)
+            writer.add_scalar("Test/mse", acc['test/mse'], epoch)
+
         
         df = pd.DataFrame({"name":names, "y":y.cpu().tolist(), "y_hat":y_hat.cpu().tolist(), "lon":lons, "lat":lats,})
         df.to_csv(os.path.join(args.log_dir,"predict.csv"))
-
+        
         # model.load_state_dict(training_weight)
 
         return acc 
@@ -220,7 +229,7 @@ def run(args):
 
 
     logging.info(f"[DataSize] train,validate,test: {len(train_list)},{len(valid_list)},{len(test_list)}")
-
+    
     train_loader = DataLoader(
         mpi_dataset(args, train_list), 
         batch_size=args.batch_size, 
@@ -258,31 +267,19 @@ def run(args):
         gp = gp_model(sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01)
 
     for epoch in range(1, args.epochs+1):
+        if gp:
+            gp.clear_params()
+
+        #training
         if epoch%1==0:
-            '''
-            training
-            '''
-            if gp:
-                gp.clear_params()
-            acc, gp = _train_epoch(args, epoch, train_model, train_loader, optimizer, gp)
-            
-                
+            train_acc, gp = _train_epoch(args, epoch, train_model, train_loader, optimizer, gp, writer)
 
-            
-            
-
-            writer.add_scalar("Train/loss", acc['loss'], epoch)
-            writer.add_scalar("Train/r2", acc['r2'], epoch)
-            writer.add_scalar("Train/mse", acc['mse'], epoch)
-        
+        #validation
         if epoch%5==0:
-            '''
-            validation
-            '''
-            acc = _valid_epoch(args, epoch, train_model.state_dict(), valid_loader, gp)
-            if acc[args.best_acc["name"]]<args.best_acc["value"]:
-                args.best_acc["value"] = float(acc[args.best_acc["name"]])
-                os.mkdir(args.log_dir) if not os.path.exists(args.log_dir) else None   
+            
+            valid_acc = _valid_epoch(args, epoch, train_model.state_dict(), valid_loader, gp, writer)
+            if valid_acc["valid/mse"] < args.best_acc:
+                args.best_acc = valid_acc["valid/mse"]
                 args.best_weight_path = os.path.join(args.log_dir, f"ep{epoch}.pth")
                 torch.save(train_model.state_dict(), args.best_weight_path)
                 if gp:
@@ -294,25 +291,16 @@ def run(args):
             else:
                 early_stop += 1
                 logging.info(f"Early Stop Counter {early_stop} of {args.max_early_stop}.")
-
+                
             if early_stop >= args.max_early_stop:
                 break
 
-
-            writer.add_scalar("Validate/loss", acc['loss'], epoch)
-            writer.add_scalar("Validate/r2", acc['r2'], epoch)
-            writer.add_scalar("Validate/mse", acc['mse'], epoch)
-            
+        # testing
         if epoch%5==0:
-            '''
-            testing
-            '''
-            acc = _test_epoch(args, epoch, test_loader, gp)
-            writer.add_scalar("Test/r2", acc['r2'], epoch)
-            writer.add_scalar("Test/mse", acc['mse'], epoch)
-
+            test_acc = _test_epoch(args, epoch, test_loader, gp, writer)
 
         scheduler.step()
+        
         if epoch%20==0:
             logging.info(f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}")
                 
@@ -321,14 +309,9 @@ def run(args):
     '''
     final test
     '''
-    acc = _test_epoch(args, epoch, test_loader, gp)
-    writer.add_scalar("Test/r2", acc['r2'], epoch)
-    writer.add_scalar("Test/mse", acc['mse'], epoch)
-        
-        # res = pd.DataFrame(res)
-        # res.to_csv(f"{args.log_dir}/test_result.csv")
-
+    test_acc = _test_epoch(args, epoch, test_loader, gp, writer)
     
+
     save_args(args)
     return "OK"
     
