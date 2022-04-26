@@ -263,7 +263,7 @@ def run(args):
     
     early_stop = 0 #  early stop
     gp = None
-    if args.run_gp:
+    if args.use_gp:
         gp = gp_model(sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01)
 
     for epoch in range(1, args.epochs+1):
