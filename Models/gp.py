@@ -1,13 +1,25 @@
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 import torch
-
+'''
+If use_gp=True, the following parameters are also used:
+        sigma: float, default=1
+            The kernel variance, or the signal variance
+        r_loc: float, default=0.5
+            The length scale for the location data (latitudes and longitudes)
+        r_year: float, default=1.5
+            The length scale for the time data (years)
+        sigma_e: float, default=0.32
+            Noise variance. 0.32 **2 ~= 0.1
+        sigma_b: float, default=0.01
+            Parameter variance; the variance on B
+'''
 
 class GaussianProcess:
     """
     The crop yield Gaussian process
     """
-    def __init__(self, sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01):
+    def __init__(self, sigma=1, r_loc=1.5, r_year=3, sigma_e=0.32, sigma_b=0.01):
         self.sigma = sigma
         self.r_loc = r_loc
         self.r_year = r_year

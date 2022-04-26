@@ -8,6 +8,7 @@ import torchmetrics
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from collections import defaultdict, namedtuple
 
 # import in-project packages
 from Losses.loss import HEMLoss,CenterLoss
@@ -16,7 +17,7 @@ from Models.gp import gp_model
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.AverageMeter import AverageMeter
 from Utils.parse import ParseYAML,parse_log
-
+from Utils.base import setup_seed
 config = ParseYAML("config.yaml")
 parser = argparse.ArgumentParser(description='Process some integers.')
 for key in config:
@@ -28,11 +29,7 @@ args.log_dir = os.path.join("Logs", args.data+"_"+args.tag, datetime.datetime.no
 '''
 setup the random seed
 '''
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed_all(args.seed)
-np.random.seed(args.seed)
-random.seed(args.seed)
-torch.backends.cudnn.deterministic = True
+setup_seed(args.seed)
 
 def logging_setting(args):
     os.makedirs(args.log_dir, exist_ok=True)
@@ -114,6 +111,7 @@ def _valid_epoch(args, epoch, training_weight, loader, gp=None, writer=None):
     valid_model = Net(args).cuda()
     valid_model.load_state_dict(training_weight)
     with torch.no_grad():
+        valid_model.eval()
         criterion = HEMLoss(0)
         losses = AverageMeter()
         y = []
@@ -160,7 +158,7 @@ def _valid_epoch(args, epoch, training_weight, loader, gp=None, writer=None):
 def _test_epoch(args, epoch, loader, gp=None, writer=None):
     with torch.no_grad():
         test_model = Net(args).cuda()
-
+        test_model.eval()
         # restore the parameters
         test_model.load_state_dict(torch.load(args.best_weight_path))
         if gp:
@@ -264,7 +262,7 @@ def run(args):
     early_stop = 0 #  early stop
     gp = None
     if args.use_gp:
-        gp = gp_model(sigma=1, r_loc=0.5, r_year=1.5, sigma_e=0.32, sigma_b=0.01)
+        gp = gp_model(sigma=1, r_loc=2.5, r_year=3., sigma_e=0.32, sigma_b=0.01)
 
     for epoch in range(1, args.epochs+1):
         if gp:
