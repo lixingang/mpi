@@ -1,6 +1,6 @@
 data: v1
 tag: baseline
-run_gp: 0
+use_gp: 0
 batch_size: 60
 seed: 0
 best_acc: 99.
