@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import torch.nn.functional as F
 
 
 def l1_l2_loss(pred, true, l1_weight, scores_dict):
@@ -32,19 +31,20 @@ def l1_l2_loss(pred, true, l1_weight, scores_dict):
         scores_dict["l1"].append(l1.item())
     scores_dict["loss"].append(loss.item())
 
-    return loss 
+    return loss
+
 
 class HEMLoss(nn.Module):
-    
+
     def __init__(self, margin):
         super().__init__()
         self.mse = nn.MSELoss()
         self.margin = margin
 
-    def forward(self, pred,real):
+    def forward(self, pred, real):
 
         cond = torch.abs(real - pred) > self.margin
-        
+
         if cond.long().sum() > 0:
             real = real[cond]
             pred = pred[cond]
@@ -55,14 +55,15 @@ class HEMLoss(nn.Module):
 
 class CenterLoss(nn.Module):
     """Center loss.
-    
+
     Reference:
     Wen et al. A Discriminative Feature Learning Approach for Deep Face Recognition. ECCV 2016.
-    
+
     Args:
         num_classes (int): number of classes.
         feat_dim (int): feature dimension.
     """
+
     def __init__(self, num_classes=2, feat_dim=128, device=True):
         super(CenterLoss, self).__init__()
         self.num_classes = num_classes
@@ -70,9 +71,11 @@ class CenterLoss(nn.Module):
         self.device = device
 
         if self.device:
-            self.centers = nn.Parameter(torch.randn(self.num_classes, self.feat_dim).to(self.device))
+            self.centers = nn.Parameter(torch.randn(
+                self.num_classes, self.feat_dim).to(self.device))
         else:
-            self.centers = nn.Parameter(torch.randn(self.num_classes, self.feat_dim))
+            self.centers = nn.Parameter(
+                torch.randn(self.num_classes, self.feat_dim))
 
     def forward(self, x, labels):
         """
@@ -82,13 +85,14 @@ class CenterLoss(nn.Module):
         """
         batch_size = x.size(0)
         distmat = torch.pow(x, 2).sum(dim=1, keepdim=True).expand(batch_size, self.num_classes) + \
-                  torch.pow(self.centers, 2).sum(dim=1, keepdim=True).expand(self.num_classes, batch_size).t()
-        
+            torch.pow(self.centers, 2).sum(dim=1, keepdim=True).expand(
+                self.num_classes, batch_size).t()
 
-        distmat.addmm_( mat1=x, mat2=self.centers.t(), beta=1, alpha=-2)
+        distmat.addmm_(mat1=x, mat2=self.centers.t(), beta=1, alpha=-2)
 
         classes = torch.arange(self.num_classes).long()
-        if self.device: classes = classes.to(self.device)
+        if self.device:
+            classes = classes.to(self.device)
         labels = labels.unsqueeze(1).expand(batch_size, self.num_classes)
         labels = (labels).int()
         mask = labels.eq(classes.expand(batch_size, self.num_classes))
@@ -99,35 +103,52 @@ class CenterLoss(nn.Module):
         return loss
 
 
-# class marginloss(nn.Module):
-#     def __init__(self, ):
-#         super().__init__()
-#         self.ms = np.load("/root/data/model/dataset/ms0103/ms_y.npy",allow_pickle=True)
-#         # print(ms)
-        
-#     def forward(self, pred, real,fea):
-#         if len(fea)==1:
-#             return 0
-#         pred = pred*self.ms[1]+self.ms[0] #恢复到归一化之前的y值
-#         real = real*self.ms[1]+self.ms[0]
-#         class_value = torch.arange(0,5) #根据真值值域分成n类
-#         real_int = torch.floor(real/3) #取floor值
-#         distance = 0 #特征距离
-#         for i in class_value:
-#             mask = torch.where(torch.eq(real_int, i), 1, 0)
-#             if torch.count_nonzero(mask)==0:
-#                 distance+=0
-#             else:
-#                 X = fea[torch.squeeze(mask>0)] 
-#                 G = torch.mm(X,X.t())
-#                 G_diag = torch.diag(G)
-#                 H =  G_diag.repeat( len(X),1)
-#                 HG = H+H.t()-2*G+1e-8
-#                 # print(i,HG)
-#                 distance += ( torch.sum(torch.sqrt(HG)) / len(X) / len(real))
-#             # print(distance)
-#             # print(distance)
-#         return distance
+def weighted_mse_loss(inputs, targets, weights=None):
+    loss = (inputs - targets) ** 2
+    weights = torch.tensor(weights).cuda()
+    if weights is not None:
+        loss *= weights.expand_as(loss)
+    loss = torch.mean(loss)
+    return loss
+
+
+def weighted_l1_loss(inputs, targets, weights=None):
+    loss = F.l1_loss(inputs, targets, reduction='none')
+    if weights is not None:
+        loss *= weights.expand_as(loss)
+    loss = torch.mean(loss)
+    return loss
+
+
+def weighted_focal_mse_loss(inputs, targets, weights=None, activate='sigmoid', beta=.2, gamma=1):
+    loss = (inputs - targets) ** 2
+    loss *= (torch.tanh(beta * torch.abs(inputs - targets))) ** gamma if activate == 'tanh' else \
+        (2 * torch.sigmoid(beta * torch.abs(inputs - targets)) - 1) ** gamma
+    if weights is not None:
+        loss *= weights.expand_as(loss)
+    loss = torch.mean(loss)
+    return loss
+
+
+def weighted_focal_l1_loss(inputs, targets, weights=None, activate='sigmoid', beta=.2, gamma=1):
+    loss = F.l1_loss(inputs, targets, reduction='none')
+    loss *= (torch.tanh(beta * torch.abs(inputs - targets))) ** gamma if activate == 'tanh' else \
+        (2 * torch.sigmoid(beta * torch.abs(inputs - targets)) - 1) ** gamma
+    if weights is not None:
+        loss *= weights.expand_as(loss)
+    loss = torch.mean(loss)
+    return loss
+
+
+def weighted_huber_loss(inputs, targets, weights=None, beta=1.):
+    weights = torch.tensor(weights).cuda()
+    l1_loss = torch.abs(inputs - targets)
+    cond = l1_loss < beta
+    loss = torch.where(cond, 0.5 * l1_loss ** 2 / beta, l1_loss - 0.5 * beta)
+    if weights is not None:
+        loss *= weights.expand_as(loss)
+    loss = torch.mean(loss)
+    return loss
 
 
 '''
@@ -142,9 +163,9 @@ def compute_squared_EDM_method4(X):
 '''
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     pass
-    # torch.autograd.set_detect_anomaly(True) 
+    # torch.autograd.set_detect_anomaly(True)
     # bs = 30
     # real = torch.randint(1,13,(bs,)) + torch.normal(torch.zeros((bs,)),torch.ones((bs,)))
     # pred = real +  torch.normal(torch.zeros((bs,)),torch.ones((bs,)))
@@ -155,4 +176,3 @@ if __name__=="__main__":
     # loss = loss_obj(real, pred, fea)
     # loss.backward()
     # print(fea.grad)
-

@@ -1,79 +1,92 @@
-data: v1
-tag: baseline
-use_gp: 0
-batch_size: 60
-seed: 0
-best_acc: 99.
-best_weight_path: null
-best_gp_path: null
-epochs: 300
-gpu: '0'
+M:
+  tag: baseline
+  model: "mlp"
+  batch_size: 60
+  seed: 0
+  best_acc: 99
+  best_weight_path: null
+  epochs: 600
+  gpu: '0'
+  
+  init_lr: 0.001
+  log_dir: None
+  max_early_stop: 15
+  restore_weight: null
+  scheduler:
+    milestones:
+      - 20
+      - 60
+      - 120
+    gamma: 0.1
 
-init_lr: 0.001
-scheduler:
-  milestones:
-  - 20
-  - 60
-  - 120
-  gamma: 0.1
-log_dir: None
-max_early_stop: 40
-img_keys:
-- AOD047
-- AOD055
-- BLUE
-- EVI
-- GREEN
-- NDVI
-- NIGHTLIGHTS
-- NIR
-- RED
-- SWIR1
-- SWIR2
-- TEMP1
-- age_struct_child
-- age_struct_middle
-- age_struct_old
-- age_struct_young
-- aspect
-- elevation
-- male
-- osm
-- pr
-- slope
-- tmmn
-- tmmx
-- viirs_v2
-num_keys:
-- DHSCLUST1
-- tmm_sum
-- Households_num
-- Individual_num
-- Number of Households2
-- area
-- death_num
-- building_area
-- burnedCount
-- conflict_num
-- death_num
-- place_num
-- poi_num
-- pr_sum
-- water
-- DHSCLUST1
-- lat
-- lon
-- year
-label_keys:
-- MPI3_fixed
-- H
-- A
-- education
-- health
-- Living Standards
-- lat
-- lon
-- year
+D:
+  name: v1
+  in_channel: 20
+  img_keys:
+    - AOD047
+    - AOD055
+    - BLUE
+    - EVI
+    - GREEN
+    - NDVI
+    - NIGHTLIGHTS
+    - NIR
+    - RED
+    - SWIR1
+    - SWIR2
+    - TEMP1
+    - age_struct_child
+    - age_struct_middle
+    - age_struct_old
+    - age_struct_young
+    - aspect
+    - elevation
+    - male
+    - osm
+    - pr
+    - slope
+    - tmmn
+    - tmmx
+    - viirs_v2
+  num_keys:
+    - DHSCLUST1
+    - tmm_sum
+    - Households_num
+    - Individual_num
+    - Number of Households2
+    - area
+    - death_num
+    - building_area
+    - burnedCount
+    - conflict_num
+    - death_num
+    - place_num
+    - poi_num
+    - pr_sum
+    - water
+    - DHSCLUST1
+    - lat
+    - lon
+    - year
+  label_keys:
+    - MPI3_fixed
+    - H
+    - A
+    - education
+    - health
+    - Living Standards
+    - lat
+    - lon
+    - year
 
-restore_weight: null
+GP:
+  is_gp: 0
+  best_gp_path: null
 
+VIT:
+  is_vit: 0
+  vit_dim: 64
+  vit_depth: 2
+  vit_heads: 3
+  vit_mlp_dim: 64
+  vit_dropout: 0.0

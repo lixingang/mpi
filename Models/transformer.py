@@ -8,6 +8,7 @@ __author__ = "Yu-Hsiang Huang"
 
 ''' Define the Layers '''
 
+
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
@@ -28,6 +29,7 @@ class ScaledDotProductAttention(nn.Module):
 
         return output, attn
 
+
 class MultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
@@ -47,7 +49,6 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
-
 
     def forward(self, q, k, v, mask=None):
 
@@ -86,8 +87,8 @@ class PositionwiseFeedForward(nn.Module):
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        self.w_1 = nn.Linear(d_in, d_hid) # position-wise
-        self.w_2 = nn.Linear(d_hid, d_in) # position-wise
+        self.w_1 = nn.Linear(d_in, d_hid)  # position-wise
+        self.w_2 = nn.Linear(d_hid, d_in)  # position-wise
         self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
 
@@ -103,13 +104,16 @@ class PositionwiseFeedForward(nn.Module):
 
         return x
 
+
 class EncoderLayer(nn.Module):
     ''' Compose with two layers '''
 
     def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
         super(EncoderLayer, self).__init__()
-        self.slf_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.pos_ffn = PositionwiseFeedForward(d_model, d_inner, dropout=dropout)
+        self.slf_attn = MultiHeadAttention(
+            n_head, d_model, d_k, d_v, dropout=dropout)
+        self.pos_ffn = PositionwiseFeedForward(
+            d_model, d_inner, dropout=dropout)
 
     def forward(self, enc_input, slf_attn_mask=None):
         enc_output, enc_slf_attn = self.slf_attn(
@@ -123,22 +127,28 @@ class DecoderLayer(nn.Module):
 
     def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
         super(DecoderLayer, self).__init__()
-        self.slf_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.pos_ffn = PositionwiseFeedForward(d_model, d_inner, dropout=dropout)
+        self.slf_attn = MultiHeadAttention(
+            n_head, d_model, d_k, d_v, dropout=dropout)
+        self.enc_attn = MultiHeadAttention(
+            n_head, d_model, d_k, d_v, dropout=dropout)
+        self.pos_ffn = PositionwiseFeedForward(
+            d_model, d_inner, dropout=dropout)
 
-    def forward(
-            self, dec_input, enc_output,
-            slf_attn_mask=None, dec_enc_attn_mask=None):
+    def forward(self, dec_input, enc_output, slf_attn_mask=None, dec_enc_attn_mask=None):
+
         dec_output, dec_slf_attn = self.slf_attn(
             dec_input, dec_input, dec_input, mask=slf_attn_mask)
+
         dec_output, dec_enc_attn = self.enc_attn(
             dec_output, enc_output, enc_output, mask=dec_enc_attn_mask)
+
         dec_output = self.pos_ffn(dec_output)
+
         return dec_output, dec_slf_attn, dec_enc_attn
 
 
 ''' Define the Transformer model '''
+
 
 def get_pad_mask(seq, pad_idx):
     return (seq != pad_idx).unsqueeze(-2)
@@ -158,7 +168,8 @@ class PositionalEncoding(nn.Module):
         super(PositionalEncoding, self).__init__()
 
         # Not a parameter
-        self.register_buffer('pos_table', self._get_sinusoid_encoding_table(n_position, d_hid))
+        self.register_buffer(
+            'pos_table', self._get_sinusoid_encoding_table(n_position, d_hid))
 
     def _get_sinusoid_encoding_table(self, n_position, d_hid):
         ''' Sinusoid position encoding table '''
@@ -167,7 +178,8 @@ class PositionalEncoding(nn.Module):
         def get_position_angle_vec(position):
             return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
 
-        sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
+        sinusoid_table = np.array([get_position_angle_vec(pos_i)
+                                  for pos_i in range(n_position)])
         sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
         sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
 
@@ -186,8 +198,10 @@ class Encoder(nn.Module):
 
         super().__init__()
 
-        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
-        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        self.src_word_emb = nn.Embedding(
+            n_src_vocab, d_word_vec, padding_idx=pad_idx)
+        self.position_enc = PositionalEncoding(
+            d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -208,7 +222,8 @@ class Encoder(nn.Module):
         enc_output = self.layer_norm(enc_output)
 
         for enc_layer in self.layer_stack:
-            enc_output, enc_slf_attn = enc_layer(enc_output, slf_attn_mask=src_mask)
+            enc_output, enc_slf_attn = enc_layer(
+                enc_output, slf_attn_mask=src_mask)
             enc_slf_attn_list += [enc_slf_attn] if return_attns else []
 
         if return_attns:
@@ -225,8 +240,10 @@ class Decoder(nn.Module):
 
         super().__init__()
 
-        self.trg_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
-        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        self.trg_word_emb = nn.Embedding(
+            n_trg_vocab, d_word_vec, padding_idx=pad_idx)
+        self.position_enc = PositionalEncoding(
+            d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -282,8 +299,10 @@ class Transformer(nn.Module):
         #   'none': no multiplication
 
         assert scale_emb_or_prj in ['emb', 'prj', 'none']
-        scale_emb = (scale_emb_or_prj == 'emb') if trg_emb_prj_weight_sharing else False
-        self.scale_prj = (scale_emb_or_prj == 'prj') if trg_emb_prj_weight_sharing else False
+        scale_emb = (scale_emb_or_prj ==
+                     'emb') if trg_emb_prj_weight_sharing else False
+        self.scale_prj = (scale_emb_or_prj ==
+                          'prj') if trg_emb_prj_weight_sharing else False
         self.d_model = d_model
 
         self.encoder = Encoder(
@@ -302,10 +321,10 @@ class Transformer(nn.Module):
 
         for p in self.parameters():
             if p.dim() > 1:
-                nn.init.xavier_uniform_(p) 
+                nn.init.xavier_uniform_(p)
 
         assert d_model == d_word_vec, \
-        'To facilitate the residual connections, \
+            'To facilitate the residual connections, \
          the dimensions of all module outputs shall be the same.'
 
         if trg_emb_prj_weight_sharing:
@@ -315,11 +334,11 @@ class Transformer(nn.Module):
         if emb_src_trg_weight_sharing:
             self.encoder.src_word_emb.weight = self.decoder.trg_word_emb.weight
 
-
     def forward(self, src_seq, trg_seq):
 
         src_mask = get_pad_mask(src_seq, self.src_pad_idx)
-        trg_mask = get_pad_mask(trg_seq, self.trg_pad_idx) & get_subsequent_mask(trg_seq)
+        trg_mask = get_pad_mask(
+            trg_seq, self.trg_pad_idx) & get_subsequent_mask(trg_seq)
 
         enc_output, *_ = self.encoder(src_seq, src_mask)
         dec_output, *_ = self.decoder(trg_seq, trg_mask, enc_output, src_mask)
@@ -328,6 +347,7 @@ class Transformer(nn.Module):
             seq_logit *= self.d_model ** -0.5
 
         return seq_logit.view(-1, seq_logit.size(2))
+
 
 if __name__ == '__main__':
     t = Transformer()
