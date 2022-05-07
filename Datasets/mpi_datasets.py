@@ -4,7 +4,8 @@ import numpy as np
 import os
 import sys
 import glob
-
+sys.path.append("/home/lxg/data/mpi/")
+from Utils.parse import parse_yaml
 
 class mpi_dataset():
     def __init__(self, args, datalist):
@@ -15,20 +16,40 @@ class mpi_dataset():
         self.img_keys = args['D']['img_keys']
         self.num_keys = args['D']['num_keys']
         self.label_keys = args['D']['label_keys']
+        self.indicator_keys = args['D']['indicator_keys']
 
     def __getitem__(self, i):
         data = torch.load(self.datalist[i])
+        
         img = np.stack([data[k] for k in self.img_keys], -1)
         num = np.stack([data[k] for k in self.num_keys], -1)
         lbl = {k: np.squeeze(np.stack(data[k], -1)) for k in self.label_keys}
+        ind = {k: np.squeeze(np.stack(data[k], -1)) for k in self.indicator_keys}
         lbl["name"] = self.datalist[i]
-        return img.squeeze(), num.squeeze(), lbl
+        
+        return img.squeeze(), num.squeeze(), lbl, ind
 
     def __len__(self):
         return len(self.datalist)
 
 
 if __name__ == '__main__':
-    pass
-    # for y, fea_img, fea_num in train_loader:
-    #     print(y.shape, fea_img.shape, fea_num.shape)
+    args = parse_yaml("config.yaml")
+    print(args['D']['name'])
+    data_list = np.array(glob.glob(f"Data/{args['D']['name']}/*"))
+    ds = mpi_dataset(args, data_list)
+    loader = torch.utils.data.DataLoader(
+        mpi_dataset(args, data_list),
+        batch_size=args['M']['batch_size'],
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=False,
+    )
+    for img, num, lbl,ind in loader:
+        print(img.shape)
+        print(num.shape)
+        print(ind.keys())
+        break
+        # print(ind)
+

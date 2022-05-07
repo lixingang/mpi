@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import os
 import sys
-
+sys.path.append("/home/lxg/data/mpi/")
 from Models.mobilenetv3 import MobileNetV3_Small
 from Models.fds import FDS
 
@@ -39,7 +39,8 @@ class MLP(nn.Module):
             nn.Linear(1024, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(inplace=True),
-            nn.Linear(1024, 1),
+            nn.Linear(1024, 10),
+            nn.ReLU(inplace=True),
             # nn.Softmax(dim=1)
         )
 
@@ -54,7 +55,13 @@ class MLP(nn.Module):
                 fea = self.FDS.smooth(fea, aux["label"], aux["epoch"])
 
         x = self.fclayer(fea)
-        return torch.squeeze(x)
+        indicator_weights = torch.tensor([
+            1/6.0, 1/6.0, 1/6.0, 1/6.0,
+            1/18.0, 1/18.0, 1/18.0, 1/18.0, 1/18.0, 1/18.0,
+        ]).cuda()
+        x = torch.sum(torch.mul(indicator_weights, x), dim=-1)
+
+        return x
 
 
 '''
@@ -87,10 +94,10 @@ MLP(
 '''
 if __name__ == "__main__":
 
-    A = torch.rand(60, 10, 25)
+    A = torch.rand(60, 20, 25)
     B = torch.rand(60, 19)
-    Label = torch.rand(60, 1)
-    model = MLP()
-    res = model((A, B))
+
+
+    model = MLP(20*25,19)
+    res = model(A, B)
     print(res.shape)
-    print(res)

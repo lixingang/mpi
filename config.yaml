@@ -9,7 +9,7 @@ M:
   gpu: '0'
   
   init_lr: 0.001
-  log_dir: None
+  log_dir: Logs
   max_early_stop: 15
   restore_weight: null
   scheduler:
@@ -20,7 +20,7 @@ M:
     gamma: 0.1
 
 D:
-  name: v1
+  name: pth_norm
   in_channel: 20
   img_keys:
     - AOD047
@@ -64,20 +64,31 @@ D:
     - poi_num
     - pr_sum
     - water
-    - DHSCLUST1
     - lat
     - lon
     - year
   label_keys:
     - MPI3_fixed
-    - H
-    - A
-    - education
-    - health
-    - Living Standards
     - lat
     - lon
     - year
+    # - H
+    # - A
+    # - education
+    # - health
+    # - Living Standards
+
+  indicator_keys:
+    - Child mortality
+    - Nutrition
+    - School attendance
+    - Years of schooling
+    - Electricity
+    - Drinking water
+    - Sanitation
+    - Housing
+    - Cooking fuel
+    - Assets
 
 GP:
   is_gp: 0
