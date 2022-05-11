@@ -25,6 +25,7 @@ class mpi_dataset():
         num = np.stack([data[k] for k in self.num_keys], -1)
         lbl = {k: np.squeeze(np.stack(data[k], -1)) for k in self.label_keys}
         ind = {k: np.squeeze(np.stack(data[k], -1)) for k in self.indicator_keys}
+        ind = np.stack([ind[k] for k in ind.keys()], -1)
         lbl["name"] = self.datalist[i]
         
         return img.squeeze(), num.squeeze(), lbl, ind
@@ -49,7 +50,7 @@ if __name__ == '__main__':
     for img, num, lbl,ind in loader:
         print(img.shape)
         print(num.shape)
-        print(ind.keys())
+        print(ind.shape)
         break
         # print(ind)
 

@@ -97,19 +97,31 @@ def get_model(args):
 def _train_epoch(args, model, callback, epoch, loader, optimizer, gp=None, writer=None):
     model.train()
     losses, y, y_hat = Meter(), Meter(), Meter()
+
     for img, num, lbl, ind in loader:
         img = img.cuda()
         num = num.cuda()
         _y = lbl["MPI3_fixed"].cuda()
+        ind = ind.float().cuda()
+        
         aux = {}
-        _y_hat = model(img, num, aux)
-        loss = weighted_huber_loss(_y_hat, _y, get_lds_weights(_y))
+        _y_hat, fea = model(img, num, aux)
+        loss1 = weighted_huber_loss(_y_hat, _y, get_lds_weights(_y))
+
+        loss2 = torch.nn.functional.mse_loss(ind, fea)
+        
+        loss = loss1+10*loss2
+        # print('---')
+        # print(loss1)
+        # print(loss2)
+        # print(loss)
         loss.backward()
         losses.update(loss)
         optimizer.step()
         optimizer.zero_grad()
         y.update(_y)
         y_hat.update(_y_hat)
+        
         if args['GP']['is_gp']:
             gp_training_params = {
                 "feat": callback['last_fea'].data,
@@ -140,7 +152,7 @@ def _train_epoch(args, model, callback, epoch, loader, optimizer, gp=None, write
                 num = num.cuda()
                 _y = lbl["MPI3_fixed"].cuda()
                 other = {"epoch": epoch, "label": _y}
-                _y_hat = model(img, num, other)
+                _y_hat,_ = model(img, num, other)
                 feat.update(callback['last_fea'].data)
                 y.update(_y)
                 y_hat.update(_y_hat)
@@ -160,7 +172,7 @@ def _valid_epoch(args, model, callback, epoch, loader, gp=None, writer=None):
             img = img.cuda()
             num = num.cuda()
             _y = lbl["MPI3_fixed"].cuda()
-            _y_hat = model(img, num)
+            _y_hat,_ = model(img, num)
             loss = weighted_mse_loss(_y_hat, _y, get_lds_weights(_y))
             losses.update(loss)
             if gp:
@@ -203,11 +215,12 @@ def _test_epoch(args, model, callback, epoch, loader, gp=None, writer=None):
             gp.restore(args['M']['best_gp_path'])
 
         y, y_hat, names, lons, lats = Meter(), Meter(), Meter(), Meter(), Meter()
+        w_feats, w_ind = Meter(),Meter()
         for img, num, lbl, ind in loader:
             img = img.cuda()
             num = num.cuda()
             _y = lbl["MPI3_fixed"].cuda()
-            _y_hat = model(img, num)
+            _y_hat,_ = model(img, num)
             if args['GP']['is_gp']:
                 gp.append_testing_params(
                     callback['last_fea'].data,
@@ -219,7 +232,14 @@ def _test_epoch(args, model, callback, epoch, loader, gp=None, writer=None):
             names.update(lbl['name'])
             lons.update(lbl['lon'])
             lats.update(lbl['lat'])
-        print(callback['weights_fea'].data)
+            w_feats.update(callback['weights_fea'].data)
+            w_ind.update(ind)
+        w_feats = w_feats.cat().cpu().detach().numpy()
+        w_ind = w_ind.cat().cpu().detach().numpy()
+        np.savetxt(os.path.join(
+            args['M']['log_dir'], "weight_features.csv"), w_feats, delimiter=',', fmt='%.3f')
+        np.savetxt(os.path.join(
+            args['M']['log_dir'], "weight_indicator.csv"), w_ind, delimiter=',', fmt='%.3f')
         if args['GP']['is_gp']:
             y_hat = gp.gp_run(
                 model.state_dict()["fclayer.3.weight"].cpu(),

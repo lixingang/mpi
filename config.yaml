@@ -5,18 +5,18 @@ M:
   seed: 0
   best_acc: 99
   best_weight_path: null
-  epochs: 600
+  epochs: 2000
   gpu: '0'
   
   init_lr: 0.001
   log_dir: Logs
-  max_early_stop: 15
+  max_early_stop: 40
   restore_weight: null
   scheduler:
     milestones:
       - 20
       - 60
-      - 120
+      - 100
     gamma: 0.1
 
 D:

@@ -40,8 +40,8 @@ class MLP(nn.Module):
             nn.BatchNorm1d(1024),
             nn.ReLU(inplace=True),
             nn.Linear(1024, 10),
-            nn.ReLU(inplace=True),
-            # nn.Softmax(dim=1)
+            # nn.ReLU(inplace=True),
+            nn.Sigmoid()
         )
 
     def forward(self, img, num, aux={}):
@@ -54,14 +54,15 @@ class MLP(nn.Module):
             if aux["epoch"] >= fds_config['start_smooth']:
                 fea = self.FDS.smooth(fea, aux["label"], aux["epoch"])
 
-        x = self.fclayer(fea)
+        fea = self.fclayer(fea)
         indicator_weights = torch.tensor([
             1/6.0, 1/6.0, 1/6.0, 1/6.0,
             1/18.0, 1/18.0, 1/18.0, 1/18.0, 1/18.0, 1/18.0,
         ]).cuda()
-        x = torch.sum(torch.mul(indicator_weights, x), dim=-1)
 
-        return x
+        x = torch.sum(torch.mul(indicator_weights, fea), dim=-1)
+
+        return x,fea
 
 
 '''
