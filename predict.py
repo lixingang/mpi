@@ -1,7 +1,5 @@
-from Utils.parse import ParseYAML, parse_log
-from Utils.clock import clock, Timer
 from Utils.base import setup_seed
-from Utils.AverageMeter import AverageMeter
+from Utils.base import Meter, parse_yaml, parse_log
 from distutils.log import error
 import matplotlib.pyplot as plt
 import math

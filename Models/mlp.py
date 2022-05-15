@@ -9,7 +9,7 @@ from Models.mobilenetv3 import MobileNetV3_Small
 from Models.fds import FDS
 
 fds_config = dict(feature_dim=1024, start_update=0,
-                  start_smooth=1, kernel='gaussian', ks=5, sigma=2)
+                  start_smooth=1, kernel='gaussian', ks=20, sigma=2)
 
 
 class MLP(nn.Module):

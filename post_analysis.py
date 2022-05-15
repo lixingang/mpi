@@ -3,7 +3,7 @@ import glob
 import os
 import pandas as pd
 import argparse
-from Utils.parse import parse_yaml, parse_log
+from Utils.base import parse_yaml, parse_log
 
 
 def get_logs(logname):

@@ -1,33 +1,39 @@
 echo "START"
 
 #---
-TAG=both_loss
+TAG=fds0515
 MODEL=mlp
-# echo ${MODEL}_${TAG}
+echo ${MODEL}_${TAG}
 python main.py --seed=10  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s
 
-python main.py --seed=20  --gpu=1 --tag=${TAG} --model=${MODEL} & sleep 1s
+python main.py --seed=20  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s
 
-python main.py --seed=30  --gpu=2 --tag=${TAG} --model=${MODEL} & sleep 1s
+python main.py --seed=30  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s
 
-python main.py --seed=40  --gpu=0 --tag=${TAG} --model=${MODEL}  & sleep 1s
+python main.py --seed=40  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
 
 python main.py --seed=50  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
 
 
-python main.py --seed=60  --gpu=0 --tag=${TAG} --model=${MODEL}  & sleep 1s
+python main.py --seed=60  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
 
-python main.py --seed=70  --gpu=0 --tag=${TAG} --model=${MODEL}  & sleep 1s
+python main.py --seed=70  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
 
 python main.py --seed=80  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
 
 python main.py --seed=90  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
 
-python main.py --seed=100  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
 wait
-python get_logs.py --name=${MODEL}_${TAG}
+python post_analysis.py --name=${MODEL}_${TAG}
 
 
 
-# python main.py --seed=10  --gpu=0   --tag=fds0508  --model=mlp  
+# python main.py --seed=10  --gpu=0   --tag=fds0514  --model=mlp  
+
+# 预测
+# files=$(ls -d /home/lxg/data/mpi/Logs/v1_mlp_0428/*/)
+# for file in $files
+# do
+#     echo predicting $file ...
+#     python predict.py --log_dir=$file
+# done

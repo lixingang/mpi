@@ -1,16 +1,16 @@
 M:
   tag: baseline
   model: "mlp"
-  batch_size: 60
+  batch_size: 50
   seed: 0
   best_acc: 99
   best_weight_path: null
-  epochs: 2000
+  epochs: 1000
   gpu: '0'
   
-  init_lr: 0.001
+  init_lr: 0.01
   log_dir: Logs
-  max_early_stop: 40
+  max_early_stop: 30
   restore_weight: null
   scheduler:
     milestones:
@@ -20,7 +20,7 @@ M:
     gamma: 0.1
 
 D:
-  name: pth_norm
+  source: data.csv
   in_channel: 20
   img_keys:
     - AOD047
@@ -96,8 +96,8 @@ GP:
 
 VIT:
   is_vit: 0
-  vit_dim: 64
+  vit_dim: 128
   vit_depth: 2
   vit_heads: 3
-  vit_mlp_dim: 64
+  vit_mlp_dim: 128
   vit_dropout: 0.0

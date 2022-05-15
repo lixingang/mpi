@@ -4,8 +4,9 @@ import numpy as np
 import os
 import sys
 import glob
+import pandas as pd
 sys.path.append("/home/lxg/data/mpi/")
-from Utils.parse import parse_yaml
+from Utils.base import parse_yaml
 
 class mpi_dataset():
     def __init__(self, args, datalist):
@@ -36,7 +37,6 @@ class mpi_dataset():
 
 if __name__ == '__main__':
     args = parse_yaml("config.yaml")
-    print(args['D']['name'])
     data_list = np.array(glob.glob(f"Data/{args['D']['name']}/*"))
     ds = mpi_dataset(args, data_list)
     loader = torch.utils.data.DataLoader(
