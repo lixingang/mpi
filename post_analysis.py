@@ -13,7 +13,7 @@ def get_logs(logname):
         cfg = parse_yaml(os.path.join(log, "config.yaml"))
         r2, rmse, mape = parse_log(os.path.join(log, "run.log"))
         items["name"].append(log)
-        items["seed"].append(cfg['M']['seed'])
+        items["seed"].append(cfg["M"]["seed"])
         items["r2"].append(r2)
         items["rmse"].append(rmse)
         items["mape"].append(mape)
@@ -27,8 +27,8 @@ def get_logs(logname):
     df.to_csv(f"Logs/{logname}/STAT_{logname}.csv", index=False)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument(f'--name', default="", type=str)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument(f"--name", default="", type=str)
     args = parser.parse_args()
     get_logs(args.name)

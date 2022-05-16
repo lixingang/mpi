@@ -6,8 +6,8 @@ M:
   best_acc: 99
   best_weight_path: null
   epochs: 1000
+  crt_epoch: 1
   gpu: '0'
-  
   init_lr: 0.01
   log_dir: Logs
   max_early_stop: 30
@@ -18,7 +18,7 @@ M:
       - 60
       - 100
     gamma: 0.1
-
+    
 D:
   source: data.csv
   in_channel: 20

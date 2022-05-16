@@ -1,7 +1,7 @@
 echo "START"
 
 #---
-TAG=fds0515
+TAG=bothloss
 MODEL=mlp
 echo ${MODEL}_${TAG}
 python main.py --seed=10  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s

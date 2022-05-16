@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 import torch
-'''
+
+"""
 If use_gp=True, the following parameters are also used:
         sigma: float, default=1
             The kernel variance, or the signal variance
@@ -13,7 +14,7 @@ If use_gp=True, the following parameters are also used:
             Noise variance. 0.32 **2 ~= 0.1
         sigma_b: float, default=0.01
             Parameter variance; the variance on B
-'''
+"""
 
 
 class GaussianProcess:
@@ -27,6 +28,7 @@ class GaussianProcess:
         self.r_year = r_year
         self.sigma_e = sigma_e
         self.sigma_b = sigma_b
+        self.num_classes = 10
 
     @staticmethod
     def _normalize(x):
@@ -35,8 +37,18 @@ class GaussianProcess:
 
         return (x - x_mean) / x_scale
 
-    def run(self, feat_train, feat_test, loc_train, loc_test, year_train, year_test,
-            train_yield, model_weights, model_bias):
+    def run(
+        self,
+        feat_train,
+        feat_test,
+        loc_train,
+        loc_test,
+        year_train,
+        year_test,
+        train_yield,
+        model_weights,
+        model_bias,
+    ):
 
         # makes sure the features have an additional testue for the bias term
         # We call the features H since the features are used as the basis functions h(x)
@@ -45,10 +57,8 @@ class GaussianProcess:
         feat_train = torch.from_numpy(feat_train)
         feat_test = torch.from_numpy(feat_test)
 
-        H_train = torch.cat(
-            (feat_train, torch.ones((feat_train.shape[0], 1))), dim=1)
-        H_test = torch.cat(
-            (feat_test, torch.ones((feat_test.shape[0], 1))), dim=1)
+        H_train = torch.cat((feat_train, torch.ones((feat_train.shape[0], 1))), dim=1)
+        H_test = torch.cat((feat_test, torch.ones((feat_test.shape[0], 1))), dim=1)
 
         Y_train = np.expand_dims(train_yield, axis=1)
         Y_train = torch.from_numpy(Y_train)
@@ -56,18 +66,14 @@ class GaussianProcess:
         n_train = feat_train.shape[0]
         n_test = feat_test.shape[0]
 
-        locations = self._normalize(
-            np.concatenate((loc_train, loc_test), axis=0))
-        years = self._normalize(np.concatenate(
-            (year_train, year_test), axis=0))
+        locations = self._normalize(np.concatenate((loc_train, loc_test), axis=0))
+        years = self._normalize(np.concatenate((year_train, year_test), axis=0))
         # to calculate the se_kernel, a dim=2 array must be passed
         years = np.expand_dims(years, axis=1)
 
         # These are the squared exponential kernel function we'll use for the covariance
-        se_loc = squareform(pdist(locations, 'euclidean')
-                            ) ** 2 / (self.r_loc ** 2)
-        se_year = squareform(pdist(years, 'euclidean')
-                             ) ** 2 / (self.r_year ** 2)
+        se_loc = squareform(pdist(locations, "euclidean")) ** 2 / (self.r_loc**2)
+        se_year = squareform(pdist(years, "euclidean")) ** 2 / (self.r_year**2)
 
         se_loc = torch.from_numpy(se_loc)
         se_year = torch.from_numpy(se_year)
@@ -75,28 +81,31 @@ class GaussianProcess:
         # make the dirac matrix we'll add onto the kernel function
         noise = torch.zeros([n_train + n_test, n_train + n_test])
         # noise[0: n_train, 0: n_train] += (self.sigma_e ** 2) * np.identity(n_train)
-        noise[0: n_train,
-              0: n_train] += (self.sigma_e ** 2) * torch.eye(n_train)
-        kernel = ((self.sigma ** 2) * torch.exp(-se_loc)
-                  * torch.exp(-se_year)) + noise
+        noise[0:n_train, 0:n_train] += (self.sigma_e**2) * torch.eye(n_train)
+        kernel = ((self.sigma**2) * torch.exp(-se_loc) * torch.exp(-se_year)) + noise
         kernel = kernel.to(torch.float32)
 
         # since B is diagonal, and B = self.sigma_b * np.identity(feat_train.shape[1]),
         # its easy to calculate the inverse of B
         B_inv = torch.eye(H_train.shape[1]) / self.sigma_b
         # "We choose b as the weight vector of the last layer of our deep models"
-        b = torch.cat((model_weights.transpose(1, 0),
-                      torch.from_numpy(np.expand_dims(model_bias, 1))))
-        K_inv = torch.linalg.inv(
-            kernel[0: n_train, 0: n_train]).to(torch.float32)
+        b = torch.cat(
+            (
+                model_weights.transpose(1, 0),
+                torch.from_numpy(np.expand_dims(model_bias, 0)),
+            )
+        )
+        K_inv = torch.linalg.inv(kernel[0:n_train, 0:n_train]).to(torch.float32)
         # The definition of beta comes from equation 2.41 in Rasmussen (2006)
         # print(H_train.dtype,K_inv.dtype ,B_inv.dtype,b.dtype,Y_train.dtype)
         beta = torch.linalg.inv(B_inv + H_train.T.mm(K_inv).mm(H_train)).mm(
-            H_train.T.mm(K_inv).mm(Y_train) + B_inv.mm(b))
+            H_train.T.mm(K_inv).mm(Y_train) + B_inv.mm(b)
+        )
         # We take the mean of g(X*) as our prediction, also from equation 2.41
-        pred = H_test.mm(
-            beta) + kernel[n_train:, :n_train].mm(K_inv).mm(Y_train - H_train.mm(beta))
-
+        pred = H_test.mm(beta) + kernel[n_train:, :n_train].mm(K_inv).mm(
+            Y_train - H_train.mm(beta)
+        )
+        print(pred.shape)
         return pred
 
 
@@ -123,7 +132,11 @@ class gp_model(GaussianProcess):
         self.test_year.append(year)
         self.test_loc.append(loc)
 
-    def gp_run(self, model_weight, model_bias,):
+    def gp_run(
+        self,
+        model_weight,
+        model_bias,
+    ):
         train_feat = np.concatenate(self.train_feat, axis=0)
         train_year = np.concatenate(self.train_year, axis=0)
         train_loc = np.concatenate(self.train_loc, axis=0)
@@ -132,11 +145,15 @@ class gp_model(GaussianProcess):
         test_loc = np.concatenate(self.test_loc, axis=0)
         test_year = np.concatenate(self.test_year, axis=0)
         gp_pred = self.run(
-            train_feat, test_feat,
-            train_loc, test_loc,
-            train_year, test_year,
+            train_feat,
+            test_feat,
+            train_loc,
+            test_loc,
+            train_year,
+            test_year,
             train_y,
-            model_weight, model_bias
+            model_weight,
+            model_bias,
         )
 
         # self.train_feat = []
@@ -162,7 +179,6 @@ class gp_model(GaussianProcess):
             # "test_year":self.test_year,
             # "model_weight":self.model_weight,
             # "model_bias":self.model_bias,
-
         }
         torch.save(gp_params, path)
 

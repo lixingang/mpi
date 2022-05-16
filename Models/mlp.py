@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
+from Models.fds import FDS
+from Models.mobilenetv3 import MobileNetV3_Small
 import torch.nn as nn
 import torch
 import numpy as np
 import os
 import sys
-sys.path.append("/home/lxg/data/mpi/")
-from Models.mobilenetv3 import MobileNetV3_Small
-from Models.fds import FDS
 
-fds_config = dict(feature_dim=1024, start_update=0,
-                  start_smooth=1, kernel='gaussian', ks=20, sigma=2)
+sys.path.append("/home/lxg/data/mpi/")
+
+fds_config = dict(
+    feature_dim=1024, start_update=0, start_smooth=1, kernel="gaussian", ks=20, sigma=2
+)
 
 
 class MLP(nn.Module):
@@ -41,7 +43,7 @@ class MLP(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(1024, 10),
             # nn.ReLU(inplace=True),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, img, num, aux={}):
@@ -51,21 +53,31 @@ class MLP(nn.Module):
         fea = torch.cat((img, num), 1)
 
         if len(aux) != 0:
-            if aux["epoch"] >= fds_config['start_smooth']:
+            if aux["epoch"] >= fds_config["start_smooth"]:
                 fea = self.FDS.smooth(fea, aux["label"], aux["epoch"])
 
-        fea = self.fclayer(fea)
-        indicator_weights = torch.tensor([
-            1/6.0, 1/6.0, 1/6.0, 1/6.0,
-            1/18.0, 1/18.0, 1/18.0, 1/18.0, 1/18.0, 1/18.0,
-        ]).cuda()
+        ind_hat = self.fclayer(fea)
+        indicator_weights = torch.tensor(
+            [
+                1 / 6.0,
+                1 / 6.0,
+                1 / 6.0,
+                1 / 6.0,
+                1 / 18.0,
+                1 / 18.0,
+                1 / 18.0,
+                1 / 18.0,
+                1 / 18.0,
+                1 / 18.0,
+            ]
+        ).cuda()
 
-        x = torch.sum(torch.mul(indicator_weights, fea), dim=-1)
+        x = torch.sum(torch.mul(indicator_weights, ind_hat), dim=-1)
 
-        return x,fea
+        return x, ind_hat
 
 
-'''
+"""
 MLP(
   (FDS): FDS()
   (Lnet1): Sequential(
@@ -92,13 +104,12 @@ MLP(
   )
 )
 
-'''
+"""
 if __name__ == "__main__":
 
     A = torch.rand(60, 20, 25)
     B = torch.rand(60, 19)
 
-
-    model = MLP(20*25,19)
+    model = MLP(20 * 25, 19)
     res = model(A, B)
     print(res.shape)

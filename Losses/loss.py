@@ -71,8 +71,8 @@ class CenterLoss(nn.Module):
         self.device = device
 
         if self.device:
-            self.centers = nn.Parameter(torch.randn(
-                self.num_classes, self.feat_dim).to(self.device))
+            self.centers = nn.Parameter(
+                torch.randn(self.num_classes, self.feat_dim).to(self.device))
         else:
             self.centers = nn.Parameter(
                 torch.randn(self.num_classes, self.feat_dim))
@@ -104,7 +104,7 @@ class CenterLoss(nn.Module):
 
 
 def weighted_mse_loss(inputs, targets, weights=None):
-    loss = (inputs - targets) ** 2
+    loss = (inputs - targets)**2
     weights = torch.tensor(weights).cuda()
     if weights is not None:
         loss *= weights.expand_as(loss)
@@ -120,8 +120,13 @@ def weighted_l1_loss(inputs, targets, weights=None):
     return loss
 
 
-def weighted_focal_mse_loss(inputs, targets, weights=None, activate='sigmoid', beta=.2, gamma=1):
-    loss = (inputs - targets) ** 2
+def weighted_focal_mse_loss(inputs,
+                            targets,
+                            weights=None,
+                            activate='sigmoid',
+                            beta=.2,
+                            gamma=1):
+    loss = (inputs - targets)**2
     loss *= (torch.tanh(beta * torch.abs(inputs - targets))) ** gamma if activate == 'tanh' else \
         (2 * torch.sigmoid(beta * torch.abs(inputs - targets)) - 1) ** gamma
     if weights is not None:
@@ -130,7 +135,12 @@ def weighted_focal_mse_loss(inputs, targets, weights=None, activate='sigmoid', b
     return loss
 
 
-def weighted_focal_l1_loss(inputs, targets, weights=None, activate='sigmoid', beta=.2, gamma=1):
+def weighted_focal_l1_loss(inputs,
+                           targets,
+                           weights=None,
+                           activate='sigmoid',
+                           beta=.2,
+                           gamma=1):
     loss = F.l1_loss(inputs, targets, reduction='none')
     loss *= (torch.tanh(beta * torch.abs(inputs - targets))) ** gamma if activate == 'tanh' else \
         (2 * torch.sigmoid(beta * torch.abs(inputs - targets)) - 1) ** gamma
@@ -144,7 +154,7 @@ def weighted_huber_loss(inputs, targets, weights=None, beta=1.):
     weights = torch.tensor(weights).cuda()
     l1_loss = torch.abs(inputs - targets)
     cond = l1_loss < beta
-    loss = torch.where(cond, 0.5 * l1_loss ** 2 / beta, l1_loss - 0.5 * beta)
+    loss = torch.where(cond, 0.5 * l1_loss**2 / beta, l1_loss - 0.5 * beta)
     if weights is not None:
         loss *= weights.expand_as(loss)
     loss = torch.mean(loss)
@@ -161,7 +171,6 @@ def compute_squared_EDM_method4(X):
   H = np.tile(np.diag(G), (n,1))
   return np.sqrt(H + H.T - 2*G)
 '''
-
 
 if __name__ == "__main__":
     pass
