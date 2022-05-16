@@ -79,40 +79,47 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
 
     model.train()
     epoch = args["M"]["crt_epoch"]
-    losses, y, y_hat = Meter(), Meter(), Meter()
-
+    meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
     for img, num, lbl, ind in loader:
         img = img.cuda()
         num = num.cuda()
-        _y = lbl["MPI3_fixed"].cuda()
+        y = lbl["MPI3_fixed"].cuda()
         ind = ind.float().cuda()
 
-        aux = {"epoch": epoch, "label": _y}
-        _y_hat, _ind_hat = model(img, num, aux)
-        loss1 = weighted_huber_loss(_y_hat, _y, get_lds_weights(_y))
-        loss2 = torch.nn.functional.mse_loss(ind, _ind_hat)
+        aux = {"epoch": epoch, "label": y}
+        yhat, indhat = model(img, num, aux)
+        loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
+        loss2 = torch.nn.functional.mse_loss(ind, indhat)
         loss = loss1 + 10 * loss2
         loss.backward()
-        losses.update(loss)
+        meters["loss"].update(loss)
         optimizer.step()
         optimizer.zero_grad()
-        y.update(_y)
-        y_hat.update(_y_hat)
+        meters["y"].update(y)
+        meters["yhat"].update(yhat)
 
         if args["GP"]["is_gp"]:
             gp_training_params = {
                 "feat": callback["last_fea"].data,
                 "year": lbl["year"],
                 "loc": np.stack([lbl["lat"], lbl["lon"]], -1),
-                "y": _y.cpu(),
+                "y": y.cpu(),
             }
             gp.append_training_params(**gp_training_params)
 
-    r2 = torchmetrics.functional.r2_score(y_hat.cat(), y.cat()).numpy().item()
-    rmse = math.sqrt(
-        torchmetrics.functional.mean_squared_error(y_hat.cat(), y.cat()).numpy().item()
+    r2 = (
+        torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
+        .numpy()
+        .item()
     )
-    acc = {"train/loss": losses.avg(), "train/r2": r2, "train/rmse": rmse}
+    rmse = math.sqrt(
+        torchmetrics.functional.mean_squared_error(
+            meters["yhat"].cat(), meters["y"].cat()
+        )
+        .numpy()
+        .item()
+    )
+    acc = {"train/loss": meters["loss"].avg(), "train/r2": r2, "train/rmse": rmse}
 
     logging.info(
         f"[train] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f}"
@@ -124,20 +131,19 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
         writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
     if 1:
-        y, y_hat = Meter(), Meter()
-        feat = Meter()
+        meters = {"y": Meter(), "yhat": Meter(), "feat": Meter()}
         with torch.no_grad():
             for img, num, lbl, ind in loader:
                 img = img.cuda()
                 num = num.cuda()
-                _y = lbl["MPI3_fixed"].cuda()
-                other = {"epoch": epoch, "label": _y}
-                _y_hat, _ = model(img, num, other)
-                feat.update(callback["last_fea"].data)
-                y.update(_y)
-                y_hat.update(_y_hat)
+                y = lbl["MPI3_fixed"].cuda()
+                other = {"epoch": epoch, "label": y}
+                yhat, _ = model(img, num, other)
+                meters["feat"].update(callback["last_fea"].data)
+                meters["y"].update(y)
+                meters["yhat"].update(yhat)
         model.FDS.update_last_epoch_stats(epoch)
-        model.FDS.update_running_stats(feat.cat(), y.cat(), epoch)
+        model.FDS.update_running_stats(meters["feat"].cat(), meters["y"].cat(), epoch)
     return acc
 
 
@@ -147,40 +153,46 @@ def _valid_epoch(args, model, callback, loader, gp=None, writer=None):
     with torch.no_grad():
         model.eval()
         # criterion = HEMLoss(0)
-        losses, y, y_hat = Meter(), Meter(), Meter()
+        meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
         for img, num, lbl, ind in loader:
             img = img.cuda()
             num = num.cuda()
-            _y = lbl["MPI3_fixed"].cuda()
+            y = lbl["MPI3_fixed"].cuda()
             ind = ind.float().cuda()
-            _y_hat, _ind_hat = model(img, num)
-            loss1 = weighted_huber_loss(_y_hat, _y, get_lds_weights(_y))
-            loss2 = torch.nn.functional.mse_loss(ind, _ind_hat)
+            yhat, indhat = model(img, num)
+            loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
+            loss2 = torch.nn.functional.mse_loss(ind, indhat)
             loss = loss1 + 10 * loss2
-            losses.update(loss)
+            meters["loss"].update(loss)
             if gp:
                 gp.append_testing_params(
                     callback["last_fea"].data,
                     lbl["year"],
                     np.stack([lbl["lat"], lbl["lon"]], -1),
                 )
-            y.update(_y)
-            y_hat.update(_y_hat)
+            meters["y"].update(y)
+            meters["yhat"].update(yhat)
 
         if gp:
             print(model.state_dict().keys())
-            _ind_hat = gp.gp_run(
+            indhat = gp.gp_run(
                 model.state_dict()["fclayer.3.weight"].cpu(),
                 model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
 
-        r2 = torchmetrics.functional.r2_score(y_hat.cat(), y.cat()).numpy().item()
-        rmse = math.sqrt(
-            torchmetrics.functional.mean_squared_error(y_hat.cat(), y.cat())
+        r2 = (
+            torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
             .numpy()
             .item()
         )
-        acc = {"valid/loss": losses.avg(), "valid/r2": r2, "valid/rmse": rmse}
+        rmse = math.sqrt(
+            torchmetrics.functional.mean_squared_error(
+                meters["yhat"].cat(), meters["y"].cat()
+            )
+            .numpy()
+            .item()
+        )
+        acc = {"valid/loss": meters["loss"].avg(), "valid/r2": r2, "valid/rmse": rmse}
 
         logging.info(
             f"[valid] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
@@ -201,38 +213,44 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
         if gp:
             gp.restore(args["M"]["best_gp_path"])
 
-        y, y_hat, names, lons, lats = Meter(), Meter(), Meter(), Meter(), Meter()
-        w_feats, w_ind = Meter(), Meter()
+        meters = {
+            "y": Meter(),
+            "yhat": Meter(),
+            "name": Meter(),
+            "lon": Meter(),
+            "lat": Meter(),
+            "ind": Meter(),
+            "indhat": Meter(),
+        }
         for img, num, lbl, ind in loader:
             img = img.cuda()
             num = num.cuda()
-            _y = lbl["MPI3_fixed"].cuda()
+            y = lbl["MPI3_fixed"].cuda()
             ind = ind.float().cuda()
-            _y_hat, _ = model(img, num)
+            yhat, indhat = model(img, num)
             if args["GP"]["is_gp"]:
                 gp.append_testing_params(
                     callback["last_fea"].data,
                     lbl["year"],
                     np.stack([lbl["lat"], lbl["lon"]], -1),
                 )
-            y.update(_y)
-            y_hat.update(_y_hat)
-            names.update(lbl["name"])
-            lons.update(lbl["lon"])
-            lats.update(lbl["lat"])
-            w_feats.update(callback["weights_fea"].data)
-            w_ind.update(ind)
-        w_feats = w_feats.cat().cpu().detach().numpy()
-        w_ind = w_ind.cat().cpu().detach().numpy()
+            meters["y"].update(y)
+            meters["yhat"].update(yhat)
+            meters["name"].update(lbl["name"])
+            meters["lon"].update(lbl["lon"])
+            meters["lat"].update(lbl["lat"])
+            meters["ind"].update(ind)
+            meters["indhat"].update(indhat)
+
         np.savetxt(
             os.path.join(args["M"]["log_dir"], "weight_features.csv"),
-            w_feats,
+            meters["indhat"].cat().cpu().detach().numpy(),
             delimiter=",",
             fmt="%.3f",
         )
         np.savetxt(
             os.path.join(args["M"]["log_dir"], "weight_indicator.csv"),
-            w_ind,
+            meters["ind"].cat().cpu().detach().numpy(),
             delimiter=",",
             fmt="%.3f",
         )
@@ -241,9 +259,15 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
                 model.state_dict()["fclayer.3.weight"].cpu(),
                 model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
-        r2 = torchmetrics.functional.r2_score(y_hat.cat(), y.cat()).numpy().item()
+        r2 = (
+            torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
+            .numpy()
+            .item()
+        )
         rmse = math.sqrt(
-            torchmetrics.functional.mean_squared_error(y_hat.cat(), y.cat())
+            torchmetrics.functional.mean_squared_error(
+                meters["yhat"].cat(), meters["y"].cat()
+            )
             .numpy()
             .item()
         )
@@ -257,11 +281,11 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
 
         df = pd.DataFrame(
             {
-                "name": names.cat(),
-                "y": y.cat(),
-                "y_hat": y_hat.cat(),
-                "lon": lons.cat(),
-                "lat": lats.cat(),
+                "name": meters["name"].cat(),
+                "y": meters["y"].cat(),
+                "yhat": meters["yhat"].cat(),
+                "lon": meters["lon"].cat(),
+                "lat": meters["lat"].cat(),
             }
         )
         df.to_csv(os.path.join(args["M"]["log_dir"], "predict.csv"))
@@ -419,6 +443,10 @@ def run():
     with open(os.path.join(args["M"]["log_dir"], "config.yaml"), "w") as f:
         yaml.dump(args, f)
     return "OK"
+
+
+def predict(log_dir):
+    args = parse_yaml(os.path.join(log_dir, "config.yaml"))
 
 
 print(run())
