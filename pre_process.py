@@ -7,10 +7,12 @@ from tqdm import tqdm
 import pandas as pd
 import fire
 import glob
+from Utils.base import parse_yaml
 
 
 class PreProcess(object):
     def __init__(self):
+        self.args = parse_yaml("config.yaml")
         self.NORM_MIN = {
             "conflict_num": 0.0,
             "tmm_sum": 2550.8984375,
@@ -185,7 +187,7 @@ class PreProcess(object):
             "Number of Individual",
         ]
 
-    def tf2pth(self, source_dir="Data/raw_data", target_dir="Data/pth"):
+    def tf2pth(self, source_dir="Data/raw_data", target_dir="Data/input_data"):
 
         os.makedirs(target_dir, exist_ok=True)
         mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
@@ -197,30 +199,43 @@ class PreProcess(object):
             for key in content.keys():
                 if isinstance(content[key], list):
                     continue
+                if key in self.args["D"]["img_keys"]:
+                    if key in ["male", "famale"]:
+                        res["gender"] = (content["famale"] - content["male"]) / (
+                            content["famale"] + content["male"]
+                        )
+                        res["gender"] = np.reshape(res["gender"], (255, 255))
+                    else:
+                        res[key] = np.reshape(content[key], (255, 255))
 
-                res[key] = content[key]
+                if key in self.args["D"]["num_keys"]:
+                    res[key] = content[key]
+                if key in self.args["D"]["label_keys"]:
+                    res[key] = content[key]
+                # if key in self.args["D"]["indicator_keys"]:
+                #     res[key] = content[key]
 
-                if res[key].shape[0] == 255 * 255:
-                    # res[key] = np.reshape(f[key], (255, 255))
-                    hist, bins = np.histogram(
-                        res[key],
-                        bins=20,
-                        range=(self.NORM_MIN[key], self.NORM_MAX[key]),
-                        density=True,
-                    )
-                    if np.isnan(np.sum(hist)):
-                        print("replaced by zeros")
-                        hist = np.zeros_like(hist)
-                    res[key] = hist
+                # if res[key].shape[0] == 255 * 255:
+                #     # res[key] = np.reshape(f[key], (255, 255))
+                #     hist, bins = np.histogram(
+                #         res[key],
+                #         bins=20,
+                #         range=(self.NORM_MIN[key], self.NORM_MAX[key]),
+                #         density=True,
+                #     )
+                #     if np.isnan(np.sum(hist)):
+                #         print("replaced by zeros")
+                #         hist = np.zeros_like(hist)
+                #     res[key] = hist
 
-                if key not in self.not_norm_list:
-                    res[key] = (res[key] - self.NORM_MIN[key]) / (
-                        self.NORM_MAX[key] - self.NORM_MIN[key]
-                    )
+                # if key not in self.not_norm_list:
+                #     res[key] = (res[key] - self.NORM_MIN[key]) / (
+                #         self.NORM_MAX[key] - self.NORM_MIN[key]
+                #     )
 
             # 在pth文件中加入nga_mpi中的额外信息
-            dhsclust = int(res["DHSCLUST1"].item())
-            year = int(res["year"].item())
+            dhsclust = int(content["DHSCLUST1"].item())
+            year = int(content["year"].item())
 
             search_result = mpi_indicator.loc[
                 (mpi_indicator["DHSCLUST"] == dhsclust)
@@ -247,7 +262,7 @@ class PreProcess(object):
         df = pd.DataFrame(label_list)
         df.to_csv("data.csv", index=None)
 
-    def inspect_pth(self, pth_dir="pth_norm"):
+    def inspect_pth(self, pth_dir="Data/pth"):
         for file in os.listdir(pth_dir):
             f = torch.load(os.path.join(pth_dir, file))
             for key in f.keys():
@@ -263,7 +278,12 @@ class PreProcess(object):
         it = tf.compat.v1.python_io.tf_record_iterator(file)
         content = decode_example(next(it))
         for key in content.keys():
-            print(key, type(content[key]))
+            if isinstance(content[key], list):
+                print(key, len(content[key]))
+            elif isinstance(content[key], np.ndarray):
+                print(key, content[key].shape)
+            else:
+                pass
 
     def get_norm_parameters(self, pth_dir="pth"):
         NORM_MIN = {}

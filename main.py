@@ -86,15 +86,16 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
         y = lbl["MPI3_fixed"].cuda()
         ind = ind.float().cuda()
 
-        aux = {"epoch": epoch, "label": y}
+        aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
+        # aux = {}
         yhat, indhat = model(img, num, aux)
         loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
         loss2 = torch.nn.functional.mse_loss(ind, indhat)
-        loss = loss1 + 10 * loss2
+        loss = loss1 + loss2
         loss.backward()
-        meters["loss"].update(loss)
         optimizer.step()
         optimizer.zero_grad()
+        meters["loss"].update(loss)
         meters["y"].update(y)
         meters["yhat"].update(yhat)
 
@@ -130,19 +131,19 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
         writer.add_scalar("Train/r2", acc["train/r2"], epoch)
         writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
-    # if 1:
-    #     meters = {"y": Meter(), "feat": Meter()}
-    #     with torch.no_grad():
-    #         for img, num, lbl, ind in loader:
-    #             img = img.cuda()
-    #             num = num.cuda()
-    #             y = lbl["MPI3_fixed"].cuda()
-    #             other = {"epoch": epoch, "label": y}
-    #             yhat, _ = model(img, num, other)
-    #             meters["feat"].update(callback["last_fea"].data)
-    #             meters["y"].update(y)
-    #     model.FDS.update_last_epoch_stats(epoch)
-    #     model.FDS.update_running_stats(meters["feat"].cat(), meters["y"].cat(), epoch)
+    if args["FDS"]["is_fds"]:
+        meters = {"y": Meter(), "feat": Meter()}
+        with torch.no_grad():
+            for img, num, lbl, ind in loader:
+                img = img.cuda()
+                num = num.cuda()
+                y = lbl["MPI3_fixed"].cuda()
+                other = {"epoch": epoch, "label": y}
+                yhat, _ = model(img, num, other)
+                meters["feat"].update(callback["last_fea"].data)
+                meters["y"].update(y)
+        model.FDS.update_last_epoch_stats(epoch)
+        model.FDS.update_running_stats(meters["feat"].cat(), meters["y"].cat(), epoch)
     return acc
 
 
@@ -161,7 +162,7 @@ def _valid_epoch(args, model, callback, loader, gp=None, writer=None):
             yhat, indhat = model(img, num)
             loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
             loss2 = torch.nn.functional.mse_loss(indhat, ind)
-            loss = loss1 + 10 * loss2
+            loss = loss1 + loss2
             meters["loss"].update(loss)
             if gp:
                 gp.append_testing_params(
@@ -263,6 +264,7 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
             .numpy()
             .item()
         )
+
         rmse = math.sqrt(
             torchmetrics.functional.mean_squared_error(
                 meters["yhat"].cat(), meters["y"].cat()
@@ -320,7 +322,7 @@ def run():
     data = pd.read_csv(args["D"]["source"])
     data_list = data["name"].tolist()
     # mpi_list = data['MPI3_fixed'].tolist()
-    train_list, valid_list, test_list = split_train_test(data_list, [0.7, 0.15, 0.15])
+    train_list, valid_list, test_list = split_train_test(data_list, [0.6, 0.2, 0.2])
 
     # 3.保存测试、验证、测试集到文件
     with open(os.path.join(args["M"]["log_dir"], "train_valid_test.yaml"), "w") as f:

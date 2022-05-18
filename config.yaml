@@ -1,7 +1,7 @@
 M:
   tag: baseline
   model: "mlp"
-  batch_size: 50
+  batch_size: 60
   seed: 0
   best_acc: 99
   best_weight_path: null
@@ -16,42 +16,33 @@ M:
     milestones:
       - 20
       - 60
-      - 100
     gamma: 0.1
     
 D:
   source: data.csv
   in_channel: 20
   img_keys:
-    - AOD047
-    - AOD055
     - BLUE
-    - EVI
     - GREEN
     - NDVI
-    - NIGHTLIGHTS
     - NIR
     - RED
-    - SWIR1
     - SWIR2
     - TEMP1
     - age_struct_child
     - age_struct_middle
     - age_struct_old
-    - age_struct_young
-    - aspect
     - elevation
     - male
-    - osm
+    - famale
     - pr
     - slope
     - tmmn
     - tmmx
     - viirs_v2
+
   num_keys:
     - tmm_sum
-    - Households_num
-    - Individual_num
     - area
     - death_num
     - building_area
@@ -68,11 +59,6 @@ D:
     - lat
     - lon
     - year
-    # - H
-    # - A
-    # - education
-    # - health
-    # - Living Standards
 
   indicator_keys:
     - Child mortality
@@ -97,3 +83,6 @@ VIT:
   vit_heads: 3
   vit_mlp_dim: 128
   vit_dropout: 0.0
+
+FDS:
+  is_fds: 1
