@@ -62,6 +62,7 @@ class Meter(object):
     """Computes and stores the average and current value"""
 
     def __init__(self):
+        self.values = []
         self.reset()
 
     def reset(self):
@@ -87,7 +88,7 @@ class Meter(object):
             print("An exception occurred, checkout the type of Meter")
 
     def cat(self, dim=0):
-        assert len(self.values) != 0
+        assert len(self.values) != 0, "Meter内的元素个数为0"
         if isinstance(self.values[0], list):
             return list(np.concatenate(self.values).flatten())
         else:

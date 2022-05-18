@@ -130,20 +130,19 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
         writer.add_scalar("Train/r2", acc["train/r2"], epoch)
         writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
-    if 1:
-        meters = {"y": Meter(), "yhat": Meter(), "feat": Meter()}
-        with torch.no_grad():
-            for img, num, lbl, ind in loader:
-                img = img.cuda()
-                num = num.cuda()
-                y = lbl["MPI3_fixed"].cuda()
-                other = {"epoch": epoch, "label": y}
-                yhat, _ = model(img, num, other)
-                meters["feat"].update(callback["last_fea"].data)
-                meters["y"].update(y)
-                meters["yhat"].update(yhat)
-        model.FDS.update_last_epoch_stats(epoch)
-        model.FDS.update_running_stats(meters["feat"].cat(), meters["y"].cat(), epoch)
+    # if 1:
+    #     meters = {"y": Meter(), "feat": Meter()}
+    #     with torch.no_grad():
+    #         for img, num, lbl, ind in loader:
+    #             img = img.cuda()
+    #             num = num.cuda()
+    #             y = lbl["MPI3_fixed"].cuda()
+    #             other = {"epoch": epoch, "label": y}
+    #             yhat, _ = model(img, num, other)
+    #             meters["feat"].update(callback["last_fea"].data)
+    #             meters["y"].update(y)
+    #     model.FDS.update_last_epoch_stats(epoch)
+    #     model.FDS.update_running_stats(meters["feat"].cat(), meters["y"].cat(), epoch)
     return acc
 
 
@@ -161,7 +160,7 @@ def _valid_epoch(args, model, callback, loader, gp=None, writer=None):
             ind = ind.float().cuda()
             yhat, indhat = model(img, num)
             loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-            loss2 = torch.nn.functional.mse_loss(ind, indhat)
+            loss2 = torch.nn.functional.mse_loss(indhat, ind)
             loss = loss1 + 10 * loss2
             meters["loss"].update(loss)
             if gp:
@@ -208,7 +207,6 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
     with torch.no_grad():
         model.eval()
         epoch = args["M"]["crt_epoch"]
-        # restore the parameters
         model.load_state_dict(torch.load(args["M"]["best_weight_path"]))
         if gp:
             gp.restore(args["M"]["best_gp_path"])
@@ -255,10 +253,11 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
             fmt="%.3f",
         )
         if args["GP"]["is_gp"]:
-            y_hat = gp.gp_run(
+            yhat = gp.gp_run(
                 model.state_dict()["fclayer.3.weight"].cpu(),
                 model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
+
         r2 = (
             torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
             .numpy()
@@ -275,6 +274,7 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
 
         logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
         logging.info(f"[test] r2={r2:.3f} rmse={rmse:.4f}")
+
         if writer:
             writer.add_scalar("Test/r2", acc["test/r2"], epoch)
             writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)

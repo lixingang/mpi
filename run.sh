@@ -28,7 +28,7 @@ python post_analysis.py --name=${MODEL}_${TAG}
 
 
 
-# python main.py --seed=10  --gpu=0   --tag=fds0514  --model=mlp  
+# python main.py --seed=10  --gpu=0   --tag=test  --model=mlp  
 
 # 预测
 # files=$(ls -d /home/lxg/data/mpi/Logs/v1_mlp_0428/*/)
