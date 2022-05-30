@@ -23,7 +23,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 from torchmetrics.functional import r2_score, mean_squared_error
 from torchinfo import summary
-
+from multiprocessing import Process
 
 # import in-project packages
 from Losses.loss import *
@@ -33,6 +33,7 @@ from Utils.base import parse_yaml, parse_log
 from Utils.base import setup_seed, Meter, SaveOutput, split_train_valid
 from Utils.torchsummary import model_info
 from Utils.LDS import get_lds_weights
+from Utils.gpu_manager import GPUManager
 
 
 def logging_setting(log_dir):
@@ -96,7 +97,10 @@ def get_model(args):
 
         model_parameter = summary(
             model,
-            input_size=[(50, len(args["D"]["img_keys"]), 224, 224), (50, 1)],
+            input_size=[
+                (1, len(args["D"]["img_keys"]), 224, 224),
+                (1, len(args["D"]["num_keys"])),
+            ],
             verbose=0,
         )
         print(
@@ -118,7 +122,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     for img, num, lbl, ind in loader:
         img = img.cuda()
         num = num.cuda()
-        y = lbl["MPI3_fixed"].cuda()
+        y = lbl["MPI3_fixed"].float().cuda()
         ind = ind.float().cuda()
 
         aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
@@ -127,6 +131,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         loss1 = torch.nn.functional.mse_loss(yhat, y)
         # loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
         loss2 = torch.nn.functional.mse_loss(ind, indhat)
+
         loss = loss1 + 0.5 * loss2
         loss.backward()
         optimizer.step()
@@ -184,7 +189,7 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
         for img, num, lbl, ind in loader:
             img = img.cuda()
             num = num.cuda()
-            y = lbl["MPI3_fixed"].cuda()
+            y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             yhat, indhat = model(img, num)
             loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
@@ -244,7 +249,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
         for img, num, lbl, ind in loader:
             img = img.cuda()
             num = num.cuda()
-            y = lbl["MPI3_fixed"].cuda()
+            y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             yhat, indhat = model(img, num)
             if args["GP"]["is_gp"]:
@@ -305,7 +310,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
         return acc
 
 
-def run(args, train_list, valid_list, test_list):
+def pipline(args, train_list, valid_list, test_list):
     if os.path.exists(args["M"]["log_dir"]):
         shutil.rmtree(args["M"]["log_dir"])
     logging_setting(args["M"]["log_dir"])
@@ -419,112 +424,159 @@ def run(args, train_list, valid_list, test_list):
     return "OK"
 
 
-if __name__ == "__main__":
+def get_list(cfg_path="origin.yaml", tag="base"):
+    # generate train valid test list
+    args = parse_yaml(cfg_path)
+    setup_seed(args["M"]["seed"])
 
-    class main:
-        def run(self, index, config_path="origin.yaml", replace=False):
-            if replace:
-                self.get_list(config_path)
-            args = parse_yaml(config_path)
-            # os.environ["CUDA_VISIBLE_DEVICES"] = str(args["M"]["device"])
-            setup_seed(args["M"]["seed"])
-            log_dir = os.path.join(
+    log_dir = os.path.join(
+        args["M"]["log_dir"],
+        args["M"]["model"]
+        + "_"
+        + os.path.splitext(os.path.basename(cfg_path))[0]
+        + "_"
+        + tag,
+    )
+
+    if os.path.exists(log_dir):
+        message = input(
+            "[INFO] found duplicate directories, whether to overwrite (Y/N)"
+        )
+        if message.lower() == "y":
+            print("[INFO] deleting the existing logs...")
+            shutil.rmtree(log_dir)
+        else:
+            print("[INFO] canceled")
+            sys.exit(0)
+
+    os.makedirs(log_dir, exist_ok=True)
+
+    data_list = pd.read_csv(args["D"]["source"])["name"].to_numpy()
+    value_list = pd.read_csv(args["D"]["source"])["MPI3_fixed"].to_numpy()
+    sorted_id = sorted(
+        range(len(value_list)), key=lambda k: value_list[k], reverse=False
+    )
+    data_list = data_list[sorted_id]
+    value_list = value_list[sorted_id]
+    # kf = KFold(n_splits=5, shuffle=True, random_state=args["M"]["seed"])
+
+    fold = []
+    k = args["M"]["k"]
+    for i in range(k):
+        fold.append([v for v in range(0 + i, len(data_list), k)])
+
+    # for i, (train_part, test_index) in enumerate(kf.split(data_list)):
+    #     train_index, valid_index = split_train_valid(train_part, [0.8, 0.2])
+    for i in range(k):
+        test_part = fold[i]
+        train_part = []
+        for j in range(k):
+            if j == i:
+                continue
+            else:
+                train_part = train_part + fold[j]
+
+        train_index, valid_index = split_train_valid(np.array(train_part), [0.7, 0.3])
+        test_index = np.array(test_part)
+
+        yamlname = (
+            os.path.join(
                 args["M"]["log_dir"],
                 args["M"]["model"]
                 + "_"
-                + os.path.splitext(os.path.basename(config_path))[0]
+                + os.path.splitext(os.path.basename(cfg_path))[0]
                 + "_"
-                + args["M"]["tag"],
+                + tag,
+                str(i),
             )
-            assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
-            args["M"]["log_dir"] = os.path.join(log_dir, str(index))
-            data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
-            train_list = data["train_list"]
-            valid_list = data["valid_list"]
-            test_list = data["test_list"]
-            train_list = [os.path.join(args["D"]["data_dir"], i) for i in train_list]
-            valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
-            test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
-            run(args, train_list, valid_list, test_list)
-
-        def get_list(self, config_path="origin.yaml", replace=True):
-            # generate train valid test list
-            args = parse_yaml(config_path)
-            setup_seed(args["M"]["seed"])
-
-            log_dir = os.path.join(
-                args["M"]["log_dir"],
-                args["M"]["model"]
-                + "_"
-                + os.path.splitext(os.path.basename(config_path))[0]
-                + "_"
-                + args["M"]["tag"],
-            )
-
-            if os.path.exists(log_dir) and replace:
-                shutil.rmtree(log_dir)
-
-            os.makedirs(log_dir, exist_ok=True)
-
-            data_list = pd.read_csv(args["D"]["source"])["name"].to_numpy()
-            value_list = pd.read_csv(args["D"]["source"])["MPI3_fixed"].to_numpy()
-            sorted_id = sorted(
-                range(len(value_list)), key=lambda k: value_list[k], reverse=False
-            )
-            data_list = data_list[sorted_id]
-            value_list = value_list[sorted_id]
-            # kf = KFold(n_splits=5, shuffle=True, random_state=args["M"]["seed"])
-
-            fold = []
-            k = args["M"]["k"]
-            for i in range(k):
-                fold.append([v for v in range(0 + i, len(data_list), k)])
-
-            # for i, (train_part, test_index) in enumerate(kf.split(data_list)):
-            #     train_index, valid_index = split_train_valid(train_part, [0.8, 0.2])
-            for i in range(k):
-                test_part = fold[i]
-                train_part = []
-                for j in range(k):
-                    if j == i:
-                        continue
-                    else:
-                        train_part = train_part + fold[j]
-
-                train_index, valid_index = split_train_valid(
-                    np.array(train_part), [0.7, 0.3]
-                )
-                test_index = np.array(test_part)
-
-                yamlname = (
-                    os.path.join(
+            + ".yaml"
+        )
+        with open(yamlname, "w") as f:
+            yaml.dump(
+                {
+                    "log_dir": os.path.join(
                         args["M"]["log_dir"],
-                        args["M"]["model"]
-                        + "_"
-                        + os.path.splitext(os.path.basename(config_path))[0]
-                        + "_"
-                        + args["M"]["tag"],
-                        str(i),
-                    )
-                    + ".yaml"
-                )
-                with open(yamlname, "w") as f:
-                    yaml.dump(
-                        {
-                            "log_dir": os.path.join(
-                                args["M"]["log_dir"],
-                                args["M"]["model"] + "_" + args["M"]["tag"],
-                            ),
-                            "train_list": data_list[train_index].tolist(),
-                            "valid_list": data_list[valid_index].tolist(),
-                            "test_list": data_list[test_index].tolist(),
-                            "train_value": value_list[train_index].tolist(),
-                            "valid_value": value_list[valid_index].tolist(),
-                            "test_value": value_list[test_index].tolist(),
-                        },
-                        f,
-                    )
-                print(f"[Create] {yamlname}")
-                # time.sleep(1)
+                        args["M"]["model"] + "_" + tag,
+                    ),
+                    "train_list": data_list[train_index].tolist(),
+                    "valid_list": data_list[valid_index].tolist(),
+                    "test_list": data_list[test_index].tolist(),
+                    "train_value": value_list[train_index].tolist(),
+                    "valid_value": value_list[valid_index].tolist(),
+                    "test_value": value_list[test_index].tolist(),
+                },
+                f,
+            )
+        print(f"[INFO] creating C-V record: {yamlname}")
+        # time.sleep(1)
 
-    fire.Fire(main)
+
+def run_1_fold(index=0, cfg_path="origin.yaml", tag="base"):
+
+    # get_list(cfg_path, tag)
+    args = parse_yaml(cfg_path)
+    # os.environ["CUDA_VISIBLE_DEVICES"] = str(args["M"]["device"])
+    setup_seed(args["M"]["seed"])
+    log_dir = os.path.join(
+        args["M"]["log_dir"],
+        args["M"]["model"]
+        + "_"
+        + os.path.splitext(os.path.basename(cfg_path))[0]
+        + "_"
+        + tag,
+    )
+    assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
+    args["M"]["log_dir"] = os.path.join(log_dir, str(index))
+    print(f"[INFO] loading C-V record {index}.yaml")
+    data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
+    train_list = data["train_list"]
+    valid_list = data["valid_list"]
+    test_list = data["test_list"]
+    train_list = [os.path.join(args["D"]["data_dir"], i) for i in train_list]
+    valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
+    test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
+    print(f"[INFO] start the pipline: {index}.yaml")
+    pipline(args, train_list, valid_list, test_list)
+
+
+def run_all(cfg_path="origin.yaml", tag="base"):
+    get_list(cfg_path, tag)
+    args = parse_yaml(cfg_path)
+    setup_seed(args["M"]["seed"])
+    log_dir = os.path.join(
+        args["M"]["log_dir"],
+        args["M"]["model"]
+        + "_"
+        + os.path.splitext(os.path.basename(cfg_path))[0]
+        + "_"
+        + tag,
+    )
+    assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
+
+    for index in range(args["M"]["k"]):
+        args["M"]["log_dir"] = os.path.join(log_dir, str(index))
+        print(f"[INFO] loading C-V record {index}.yaml")
+        data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
+        train_list = data["train_list"]
+        valid_list = data["valid_list"]
+        test_list = data["test_list"]
+        train_list = [os.path.join(args["D"]["data_dir"], i) for i in train_list]
+        valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
+        test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
+        print(f"[INFO] start the pipline: {index}.yaml")
+        # pipline(args, train_list, valid_list, test_list)
+        print("[INFO] Query the idle GPU")
+        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
+        memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+        print(f"[INFO] the GPU:{np.argmax(memory_gpu)} was selected")
+        best_gpu = int(np.argmax(memory_gpu))
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
+        # os.system("rm tmp")  # 删除临时生成的 tmp 文件
+        p = Process(target=pipline, args=(args, train_list, valid_list, test_list))
+        p.start()
+        time.sleep(10)
+
+
+if __name__ == "__main__":
+    torch.multiprocessing.set_start_method("spawn")  # good solution !!!!
+    fire.Fire(run_all)

@@ -47,6 +47,9 @@ def window_partition(x, window_size):
         windows: (num_windows*B, window_size, window_size, C)
     """
     B, H, W, C = x.shape
+    # assert H == window_size * (H // window_size) and W == window_size * (
+    #     W // window_size
+    # ), f"Please check H:{H}, W:{W} and window_size:{window_size}"
     x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
     windows = (
         x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
@@ -278,6 +281,7 @@ class SwinTransformerBlock(nn.Module):
         if self.shift_size > 0:
             # calculate attention mask for SW-MSA
             H, W = self.input_resolution
+
             img_mask = torch.zeros((1, H, W, 1))  # 1 H W 1
             h_slices = (
                 slice(0, -self.window_size),
@@ -737,9 +741,8 @@ class SwinTransformer(nn.Module):
         return x
 
     def forward(self, x, num, aux={}):
-        # num = num.to(torch.float32)
-        # x = torch.permute(x, (0, 3, 1, 2))
-        x = self.forward_features(x, None)
+        num = num.to(torch.float32)
+        x = self.forward_features(x, num)
         ind_hat = self.head(x)
         ind_hat = torch.sigmoid(ind_hat)
 

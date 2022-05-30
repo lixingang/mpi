@@ -1,5 +1,4 @@
 M:
-  tag: embeddim96
   model: swint
   batch_size: 40
   seed: 1
@@ -10,7 +9,7 @@ M:
   device: 0
   init_lr: 0.0001
   log_dir: Logs
-  max_early_stop: 20
+  max_early_stop: 10
   restore_weight: null
   k: 5
   scheduler:
@@ -20,8 +19,8 @@ M:
     gamma: 0.1
     
 D:
-  source: Data/data.csv
-  data_dir: /home/lxg/data/mpi/Data/origin
+  source: Data/nga_mpi.csv
+  data_dir: /home/lxg/data/mpi/Data/origin224
   img_keys:
     - BLUE
     - GREEN
