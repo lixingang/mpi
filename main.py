@@ -1,8 +1,9 @@
 # import office packages
+import enum
 import os
 import sys
 import yaml
-from click import argument
+import fire
 import torch
 import logging
 import argparse
@@ -12,20 +13,24 @@ import random
 import datetime
 import shutil
 import math
-from torch.utils.data import DataLoader, ConcatDataset
+import copy
+from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR, LambdaLR, MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 import torchmetrics
 import numpy as np
 import pandas as pd
-from collections import defaultdict, namedtuple
+from sklearn.model_selection import KFold
+from torchmetrics.functional import r2_score, mean_squared_error
+from torchinfo import summary
+
 
 # import in-project packages
 from Losses.loss import *
 from Models import *
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.base import parse_yaml, parse_log
-from Utils.base import setup_seed, Meter, SaveOutput, split_train_test
+from Utils.base import setup_seed, Meter, SaveOutput, split_train_valid
 from Utils.torchsummary import model_info
 from Utils.LDS import get_lds_weights
 
@@ -43,7 +48,7 @@ def logging_setting(log_dir):
 
 
 def get_model(args):
-    assert args["M"]["model"].lower() in {"vit", "mlp"}
+    assert args["M"]["model"].lower() in {"vit", "mlp", "swint"}
     model = None
     callback = {}
     callback["last_fea"] = SaveOutput()
@@ -60,6 +65,7 @@ def get_model(args):
             dropout=args["VIT"]["vit_dropout"],
             emb_dropout=args["VIT"]["vit_dropout"],
         ).cuda()
+        print(model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
         hook1 = model.mlp_head[0].register_forward_hook(callback["last_fea"])
         hook2 = model.mlp_head[1].register_forward_hook(callback["weights_fea"])
 
@@ -68,14 +74,43 @@ def get_model(args):
             len(args["D"]["img_keys"]) * args["D"]["in_channel"],
             len(args["D"]["num_keys"]),
         ).cuda()
-
+        print(model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
         hook1 = model.fclayer[2].register_forward_hook(callback["last_fea"])
         hook2 = model.fclayer[4].register_forward_hook(callback["weights_fea"])
+
+    elif args["M"]["model"].lower() == "swint":
+        model = SwinTransformer(
+            img_size=224,
+            patch_size=4,
+            in_chans=len(args["D"]["img_keys"]),
+            num_classes=10,
+            embed_dim=54,
+            depths=[2, 2, 6, 2],
+            num_heads=[3, 6, 12, 24],
+            window_size=7,
+            mlp_ratio=4.0,
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            drop_path_rate=0.000,
+        ).cuda()
+
+        model_parameter = summary(
+            model,
+            input_size=[(50, len(args["D"]["img_keys"]), 224, 224), (50, 1)],
+            verbose=0,
+        )
+        print(
+            model_parameter,
+            file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"),
+        )
+
+        hook1 = model.avgpool.register_forward_hook(callback["last_fea"])
+        hook2 = model.head.register_forward_hook(callback["weights_fea"])
 
     return model, callback
 
 
-def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None):
+def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
 
     model.train()
     epoch = args["M"]["crt_epoch"]
@@ -89,9 +124,10 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
         aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         # aux = {}
         yhat, indhat = model(img, num, aux)
-        loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
+        loss1 = torch.nn.functional.mse_loss(yhat, y)
+        # loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
         loss2 = torch.nn.functional.mse_loss(ind, indhat)
-        loss = loss1 + loss2
+        loss = loss1 + 0.5 * loss2
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -108,17 +144,9 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
             }
             gp.append_training_params(**gp_training_params)
 
-    r2 = (
-        torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
-        .numpy()
-        .item()
-    )
+    r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
     rmse = math.sqrt(
-        torchmetrics.functional.mean_squared_error(
-            meters["yhat"].cat(), meters["y"].cat()
-        )
-        .numpy()
-        .item()
+        mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
     )
     acc = {"train/loss": meters["loss"].avg(), "train/r2": r2, "train/rmse": rmse}
 
@@ -126,10 +154,9 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
         f"[train] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f}"
     )
 
-    if writer:
-        writer.add_scalar("Train/loss", acc["train/loss"], epoch)
-        writer.add_scalar("Train/r2", acc["train/r2"], epoch)
-        writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
+    writer.add_scalar("Train/loss", acc["train/loss"], epoch)
+    writer.add_scalar("Train/r2", acc["train/r2"], epoch)
+    writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
     if args["FDS"]["is_fds"]:
         meters = {"y": Meter(), "feat": Meter()}
@@ -147,7 +174,7 @@ def _train_epoch(args, model, callback, loader, optimizer, gp=None, writer=None)
     return acc
 
 
-def _valid_epoch(args, model, callback, loader, gp=None, writer=None):
+def valid_epoch(args, model, callback, loader, writer, gp=None):
     global early_stop
     epoch = args["M"]["crt_epoch"]
     with torch.no_grad():
@@ -180,31 +207,24 @@ def _valid_epoch(args, model, callback, loader, gp=None, writer=None):
                 model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
 
-        r2 = (
-            torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
-            .numpy()
-            .item()
-        )
+        r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         rmse = math.sqrt(
-            torchmetrics.functional.mean_squared_error(
-                meters["yhat"].cat(), meters["y"].cat()
-            )
-            .numpy()
-            .item()
+            mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         )
         acc = {"valid/loss": meters["loss"].avg(), "valid/r2": r2, "valid/rmse": rmse}
 
         logging.info(
             f"[valid] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
         )
-        if writer:
-            writer.add_scalar("Valid/loss", acc["valid/loss"], epoch)
-            writer.add_scalar("Valid/r2", acc["valid/r2"], epoch)
-            writer.add_scalar("Valid/rmse", acc["valid/rmse"], epoch)
+
+        writer.add_scalar("Valid/loss", acc["valid/loss"], epoch)
+        writer.add_scalar("Valid/r2", acc["valid/r2"], epoch)
+        writer.add_scalar("Valid/rmse", acc["valid/rmse"], epoch)
+
     return acc
 
 
-def _test_epoch(args, model, callback, loader, gp=None, writer=None):
+def test_epoch(args, model, callback, loader, writer, gp=None):
     with torch.no_grad():
         model.eval()
         epoch = args["M"]["crt_epoch"]
@@ -259,27 +279,17 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
                 model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
 
-        r2 = (
-            torchmetrics.functional.r2_score(meters["yhat"].cat(), meters["y"].cat())
-            .numpy()
-            .item()
-        )
-
+        r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         rmse = math.sqrt(
-            torchmetrics.functional.mean_squared_error(
-                meters["yhat"].cat(), meters["y"].cat()
-            )
-            .numpy()
-            .item()
+            mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         )
         acc = {"test/r2": r2, "test/rmse": rmse}
 
         logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
         logging.info(f"[test] r2={r2:.3f} rmse={rmse:.4f}")
 
-        if writer:
-            writer.add_scalar("Test/r2", acc["test/r2"], epoch)
-            writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
+        writer.add_scalar("Test/r2", acc["test/r2"], epoch)
+        writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
 
         df = pd.DataFrame(
             {
@@ -295,45 +305,11 @@ def _test_epoch(args, model, callback, loader, gp=None, writer=None):
         return acc
 
 
-def run():
-    # 1.开始训练前的处理，包含配置文件、随机种子、显卡、tb定义
-    args = parse_yaml("config.yaml")
-    parser = argparse.ArgumentParser(description="Process some integers.")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--gpu", default=None)
-    parser.add_argument("--tag", type=str, default=None)
-    parser.add_argument("--model", type=str, default=None)
-    modify_args = parser.parse_args()
-
-    args["M"].update(vars(modify_args))
-    args["M"]["log_dir"] = os.path.join(
-        args["M"]["log_dir"],
-        args["M"]["model"] + "_" + args["M"]["tag"],
-        datetime.datetime.now().strftime("%b%d_%H-%M-%S"),
-    )
-
-    setup_seed(args["M"]["seed"])
-    os.environ["CUDA_VISIBLE_DEVICES"] = args["M"]["gpu"]
-
+def run(args, train_list, valid_list, test_list):
+    if os.path.exists(args["M"]["log_dir"]):
+        shutil.rmtree(args["M"]["log_dir"])
     logging_setting(args["M"]["log_dir"])
     writer = SummaryWriter(log_dir=args["M"]["log_dir"])
-
-    # 2.划分数据集并保存、得到dataloader
-    data = pd.read_csv(args["D"]["source"])
-    data_list = data["name"].tolist()
-    # mpi_list = data['MPI3_fixed'].tolist()
-    train_list, valid_list, test_list = split_train_test(data_list, [0.6, 0.2, 0.2])
-
-    # 3.保存测试、验证、测试集到文件
-    with open(os.path.join(args["M"]["log_dir"], "train_valid_test.yaml"), "w") as f:
-        yaml.dump(
-            {
-                "train_list": train_list,
-                "valid_list": valid_list,
-                "test_list": test_list,
-            },
-            f,
-        )
 
     logging.info(
         f"[DataSize] train,validate,test: {len(train_list)},{len(valid_list)},{len(test_list)}"
@@ -366,8 +342,6 @@ def run():
     if args["M"]["restore_weight"] is not None:
         train_model.load_state_dict(torch.load(args["M"]["restore_weight"]))
 
-    print(train_model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
-
     # 6.初始化定义优化器、Scheduler
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, train_model.parameters()),
@@ -390,14 +364,14 @@ def run():
 
         # training
         if epoch % 1 == 0:
-            _ = _train_epoch(
-                args, train_model, callback, train_loader, optimizer, gp, writer
+            _ = train_epoch(
+                args, train_model, callback, train_loader, optimizer, writer, gp
             )
 
         # validation
         if epoch % 5 == 0:
-            valid_acc = _valid_epoch(
-                args, train_model, callback, valid_loader, gp, writer
+            valid_acc = valid_epoch(
+                args, train_model, callback, valid_loader, writer, gp
             )
             if valid_acc["valid/rmse"] < args["M"]["best_acc"]:
                 args["M"]["best_acc"] = valid_acc["valid/rmse"]
@@ -412,6 +386,9 @@ def run():
                     gp.save(args["M"]["best_gp_path"])
 
                 early_stop = 0
+                # if best validation model, then testing
+                test_model, test_callback = get_model(args)
+                _ = test_epoch(args, test_model, test_callback, test_loader, writer, gp)
 
             else:
                 early_stop += 1
@@ -422,23 +399,18 @@ def run():
             if early_stop >= args["M"]["max_early_stop"]:
                 break
 
-        # testing
-        if epoch % 5 == 0:
-            test_model, test_callback = get_model(args)
-            _ = _test_epoch(args, test_model, test_callback, test_loader, gp, writer)
-
         scheduler.step()
 
-        if epoch % 20 == 0:
-            logging.info(
-                f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}"
-            )
+        # if epoch % 20 == 0:
+        #     logging.info(
+        #         f"epoch{epoch}, Current learning rate: {scheduler.get_last_lr()}"
+        #     )
 
     """
     final test
     """
     test_model, callback = get_model(args)
-    _ = _test_epoch(args, test_model, callback, test_loader, gp, writer)
+    _ = test_epoch(args, test_model, callback, test_loader, writer, gp)
 
     # save args
     os.makedirs(args["M"]["log_dir"], exist_ok=True)
@@ -447,8 +419,112 @@ def run():
     return "OK"
 
 
-def predict(log_dir):
-    args = parse_yaml(os.path.join(log_dir, "config.yaml"))
+if __name__ == "__main__":
 
+    class main:
+        def run(self, index, config_path="origin.yaml", replace=False):
+            if replace:
+                self.get_list(config_path)
+            args = parse_yaml(config_path)
+            # os.environ["CUDA_VISIBLE_DEVICES"] = str(args["M"]["device"])
+            setup_seed(args["M"]["seed"])
+            log_dir = os.path.join(
+                args["M"]["log_dir"],
+                args["M"]["model"]
+                + "_"
+                + os.path.splitext(os.path.basename(config_path))[0]
+                + "_"
+                + args["M"]["tag"],
+            )
+            assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
+            args["M"]["log_dir"] = os.path.join(log_dir, str(index))
+            data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
+            train_list = data["train_list"]
+            valid_list = data["valid_list"]
+            test_list = data["test_list"]
+            train_list = [os.path.join(args["D"]["data_dir"], i) for i in train_list]
+            valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
+            test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
+            run(args, train_list, valid_list, test_list)
 
-print(run())
+        def get_list(self, config_path="origin.yaml", replace=True):
+            # generate train valid test list
+            args = parse_yaml(config_path)
+            setup_seed(args["M"]["seed"])
+
+            log_dir = os.path.join(
+                args["M"]["log_dir"],
+                args["M"]["model"]
+                + "_"
+                + os.path.splitext(os.path.basename(config_path))[0]
+                + "_"
+                + args["M"]["tag"],
+            )
+
+            if os.path.exists(log_dir) and replace:
+                shutil.rmtree(log_dir)
+
+            os.makedirs(log_dir, exist_ok=True)
+
+            data_list = pd.read_csv(args["D"]["source"])["name"].to_numpy()
+            value_list = pd.read_csv(args["D"]["source"])["MPI3_fixed"].to_numpy()
+            sorted_id = sorted(
+                range(len(value_list)), key=lambda k: value_list[k], reverse=False
+            )
+            data_list = data_list[sorted_id]
+            value_list = value_list[sorted_id]
+            # kf = KFold(n_splits=5, shuffle=True, random_state=args["M"]["seed"])
+
+            fold = []
+            k = args["M"]["k"]
+            for i in range(k):
+                fold.append([v for v in range(0 + i, len(data_list), k)])
+
+            # for i, (train_part, test_index) in enumerate(kf.split(data_list)):
+            #     train_index, valid_index = split_train_valid(train_part, [0.8, 0.2])
+            for i in range(k):
+                test_part = fold[i]
+                train_part = []
+                for j in range(k):
+                    if j == i:
+                        continue
+                    else:
+                        train_part = train_part + fold[j]
+
+                train_index, valid_index = split_train_valid(
+                    np.array(train_part), [0.7, 0.3]
+                )
+                test_index = np.array(test_part)
+
+                yamlname = (
+                    os.path.join(
+                        args["M"]["log_dir"],
+                        args["M"]["model"]
+                        + "_"
+                        + os.path.splitext(os.path.basename(config_path))[0]
+                        + "_"
+                        + args["M"]["tag"],
+                        str(i),
+                    )
+                    + ".yaml"
+                )
+                with open(yamlname, "w") as f:
+                    yaml.dump(
+                        {
+                            "log_dir": os.path.join(
+                                args["M"]["log_dir"],
+                                args["M"]["model"] + "_" + args["M"]["tag"],
+                            ),
+                            "train_list": data_list[train_index].tolist(),
+                            "valid_list": data_list[valid_index].tolist(),
+                            "test_list": data_list[test_index].tolist(),
+                            "train_value": value_list[train_index].tolist(),
+                            "valid_value": value_list[valid_index].tolist(),
+                            "test_value": value_list[test_index].tolist(),
+                        },
+                        f,
+                    )
+                print(f"[Create] {yamlname}")
+                # time.sleep(1)
+
+    fire.Fire(main)

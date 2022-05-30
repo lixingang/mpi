@@ -12,7 +12,7 @@ from Utils.base import parse_yaml
 
 class PreProcess(object):
     def __init__(self):
-        self.args = parse_yaml("config.yaml")
+        self.args = parse_yaml("Config/config.yaml")
         self.NORM_MIN = {
             "conflict_num": 0.0,
             "tmm_sum": 2550.8984375,
@@ -155,7 +155,6 @@ class PreProcess(object):
             "Cooking fuel": 1.0,
             "Assets": 1.0,
         }
-
         self.not_norm_list = [
             "Country",
             "country",
@@ -187,7 +186,7 @@ class PreProcess(object):
             "Number of Individual",
         ]
 
-    def tf2pth(self, source_dir="Data/raw_data", target_dir="Data/input_data"):
+    def tf2pth_origin(self, source_dir="Data/raw_data", target_dir="Data/origin"):
 
         os.makedirs(target_dir, exist_ok=True)
         mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
@@ -199,17 +198,84 @@ class PreProcess(object):
             for key in content.keys():
                 if isinstance(content[key], list):
                     continue
-                if key in self.args["D"]["img_keys"]:
-                    if key in ["male", "famale"]:
-                        res["gender"] = (content["famale"] - content["male"]) / (
-                            content["famale"] + content["male"]
-                        )
-                        res["gender"] = np.reshape(res["gender"], (255, 255))
-                    else:
-                        res[key] = np.reshape(content[key], (255, 255))
+
+                if key in self.args["D"]["origin_img_keys"]:
+                    res[key] = np.reshape(content[key], (255, 255))[16:240, 16:240]
 
                 if key in self.args["D"]["num_keys"]:
                     res[key] = content[key]
+
+                if key in self.args["D"]["label_keys"]:
+                    res[key] = content[key]
+
+            # 在pth文件中加入nga_mpi中的额外信息
+            dhsclust = int(content["DHSCLUST1"].item())
+            year = int(content["year"].item())
+
+            search_result = mpi_indicator.loc[
+                (mpi_indicator["DHSCLUST"] == dhsclust)
+                & (mpi_indicator["Year"] == year)
+            ].head()
+
+            for (col_name, col_data) in search_result.iteritems():
+                res[col_name] = np.asarray([col_data.item()])
+
+            save_name = f"nga_{year}_{dhsclust}.pth"
+            torch.save(
+                res,
+                os.path.join(target_dir, save_name),
+                _use_new_zipfile_serialization=False,
+            )
+
+        # self._get_info(target_dir)
+
+    def tf2pth_reduce(self, source_dir="Data/raw_data", target_dir="Data/input_data2"):
+
+        os.makedirs(target_dir, exist_ok=True)
+        mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
+        for f in tqdm(os.listdir(source_dir)):
+            it = tf.compat.v1.python_io.tf_record_iterator(os.path.join(source_dir, f))
+
+            content = decode_example(next(it))
+            res = {}
+            for key in content.keys():
+                if isinstance(content[key], list):
+                    continue
+                # if key in ['']
+                # if key in ["male", "famale"]:
+                #     sex = (content["famale"] - content["male"]) / (
+                #         content["famale"] + content["male"]
+                #     )
+
+                #     pop = content["famale"] + content["male"]
+                #     res["sex"] = np.reshape(sex, (255, 255))[16:240, 16:240]
+                #     res["pop"] = np.reshape(pop, (255, 255))[16:240, 16:240]
+
+                # if key in [
+                #     "age_struct_child",
+                #     "age_struct_young",
+                #     "age_struct_middle",
+                #     "age_struct_old",
+                # ]:
+                #     total_pop = (
+                #         content["age_struct_child"]
+                #         + content["age_struct_young"]
+                #         + content["age_struct_middle"]
+                #         + content["age_struct_old"]
+                #     )
+                #     specical_pop = (
+                #         content["age_struct_child"] + content["age_struct_old"]
+                #     )
+                #     age = specical_pop / total_pop
+
+                #     res["age"] = np.reshape(age, (255, 255))[16:240, 16:240]
+
+                if key in self.args["D"]["img_keys"]:
+                    res[key] = np.reshape(content[key], (255, 255))[16:240, 16:240]
+
+                if key in self.args["D"]["num_keys"]:
+                    res[key] = content[key]
+
                 if key in self.args["D"]["label_keys"]:
                     res[key] = content[key]
                 # if key in self.args["D"]["indicator_keys"]:
@@ -252,17 +318,37 @@ class PreProcess(object):
                 _use_new_zipfile_serialization=False,
             )
 
-    def get_info(self, source_dir="Data/pth"):
-        label_list = {"name": [], "MPI3_fixed": []}
-        for i in glob.glob(f"{source_dir}/*.pth"):
-            label_list["name"].append(i)
-            label_list["MPI3_fixed"].append(
-                round(torch.load(i)["MPI3_fixed"].item(), 3)
-            )
+        self.get_info(target_dir)
+
+    def get_info(self, source_dir="Data/origin"):
+        label_list = {"name": []}
+        mpi_indicator = [
+            "MPI3_fixed",
+            "lon",
+            "lat",
+            "Child mortality",
+            "Nutrition",
+            "School attendance",
+            "Years of schooling",
+            "Electricity",
+            "Drinking water",
+            "Sanitation",
+            "Housing",
+            "Cooking fuel",
+            "Assets",
+        ]
+
+        for i in tqdm(glob.glob(f"{source_dir}/*.pth")):
+            label_list["name"].append(os.path.basename(i))
+
+            for ind in mpi_indicator:
+                if ind not in label_list.keys():
+                    label_list[ind] = []
+                label_list[ind].append(round(torch.load(i)[ind].item(), 4))
         df = pd.DataFrame(label_list)
         df.to_csv("data.csv", index=None)
 
-    def inspect_pth(self, pth_dir="Data/pth"):
+    def inspect_pth(self, pth_dir="Data/origin"):
         for file in os.listdir(pth_dir):
             f = torch.load(os.path.join(pth_dir, file))
             for key in f.keys():

@@ -58,6 +58,16 @@ def split_train_test(data_list, ratio=[0.6, 0.2, 0.2]):
         return data_list[:slice1], data_list[slice1:slice2], data_list[slice2:]
 
 
+def split_train_valid(data_list, ratio=[0.6, 0.4]):
+    idx = list(range(len(data_list)))
+    assert len(ratio) == 2, "请确认ratio长度为2，该函数仅用于划分训练、验证集"
+    assert np.sum(np.array(ratio)) == 1.0, "请确认ratio总和为1"
+    random.shuffle(idx)
+    slice1 = int(len(idx) * ratio[0])
+    slice2 = int(len(idx) * (ratio[1] + ratio[0]))
+    return data_list[:slice1], data_list[slice1:slice2]
+
+
 class Meter(object):
     """Computes and stores the average and current value"""
 

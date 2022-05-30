@@ -8,7 +8,7 @@ from Utils.base import parse_yaml, parse_log
 
 def get_logs(logname):
     items = {"name": [], "seed": [], "r2": [], "rmse": [], "mape": []}
-    log_list = glob.glob(f"Logs/{logname}/*")
+    log_list = glob.glob(f"Logs/{logname}/*/")
     for log in log_list:
         cfg = parse_yaml(os.path.join(log, "config.yaml"))
         r2, rmse, mape = parse_log(os.path.join(log, "run.log"))

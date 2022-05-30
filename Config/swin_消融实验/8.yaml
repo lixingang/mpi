@@ -1,27 +1,51 @@
 M:
   tag: baseline
-  model: "mlp"
-  batch_size: 60
-  seed: 0
+  model: swint
+  batch_size: 40
+  seed: 1
   best_acc: 99
   best_weight_path: null
   epochs: 1000
   crt_epoch: 1
-  gpu: '0'
-  init_lr: 0.01
+  device: 1
+  init_lr: 0.0001
   log_dir: Logs
-  max_early_stop: 30
+  max_early_stop: 10
   restore_weight: null
+  k: 5
   scheduler:
     milestones:
-      - 20
+      - 30
       - 60
     gamma: 0.1
     
 D:
-  source: data.csv
-  in_channel: 20
+  source: Data/data.csv
+  data_dir: /home/lxg/data/mpi/Data/origin
   img_keys:
+    - BLUE
+    - GREEN
+    - NDVI
+    - NIR
+    - RED
+    - SWIR2
+    - TEMP1
+    # - age_struct_child
+    - age_struct_middle
+    - age_struct_old
+    - elevation
+    - slope
+    - famale
+    - male
+    - pr
+    - tmmn
+    - tmmx
+    - viirs_v2
+  deprecated_keys:
+    - NDVI
+    - slope
+    
+  origin_img_keys:
     - BLUE
     - GREEN
     - NDVI
@@ -33,10 +57,10 @@ D:
     - age_struct_middle
     - age_struct_old
     - elevation
-    - male
-    - famale
-    - pr
     - slope
+    - famale
+    - male
+    - pr
     - tmmn
     - tmmx
     - viirs_v2
@@ -85,4 +109,4 @@ VIT:
   vit_dropout: 0.0
 
 FDS:
-  is_fds: 1
+  is_fds: 0

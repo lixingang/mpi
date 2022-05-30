@@ -1,11 +1,37 @@
 ---
+NEW
+---
+
+全部图像数据：0.69
+
+- BLUE
+- GREEN
+- NDVI
+- NIR
+- RED
+- SWIR2
+- TEMP1
+- age_struct_child
+- age_struct_middle
+- age_struct_old
+- elevation
+- famale
+- male
+- pr
+- slope
+- tmmn
+- tmmx
+- viirs_v2
+
+
+---
+legacy
+---
 
 【Data】
 - v1 图像归一化、直方图化20维
 - v2 图像归一化、直方图化30维
 - v3 图像归一化、直方图化20维，raw_data_removed，去除mpi_fixed==0的item
-
----
 
 【Logs】
 2022年4月13日16:46:00 使用随机数10,20,30,...,100,数据是Data/v1, 得到baseline的结果baseline.csv,r2=0.504
@@ -19,4 +45,6 @@
 2022年4月26日14:20:58 调整gp模型参数，维持不变
 
 2022年5月1日21:16:44 lds+fds: r2=0.731,mse=0.0147
----
+
+
+

@@ -1,41 +1,13 @@
 echo "START"
-
-#---
-TAG=fds_d4
-MODEL=mlp
-echo ${MODEL}_${TAG}
-python main.py --seed=10  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s
-
-python main.py --seed=20  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s
-
-python main.py --seed=30  --gpu=0 --tag=${TAG} --model=${MODEL} & sleep 1s
-
-python main.py --seed=40  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
-python main.py --seed=50  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
-
-python main.py --seed=60  --gpu=1 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
-python main.py --seed=70  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
-python main.py --seed=80  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
-python main.py --seed=90  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
-python main.py --seed=100  --gpu=2 --tag=${TAG} --model=${MODEL}  & sleep 1s
-
+python main.py get_list Config/config.yaml &
 wait
-python post_analysis.py --name=${MODEL}_${TAG}
+CUDA_VISIBLE_DEVICES=1 python main.py run 0 Config/config.yaml &
+CUDA_VISIBLE_DEVICES=2 python main.py run 1 Config/config.yaml &
+CUDA_VISIBLE_DEVICES=0 python main.py run 2 Config/config.yaml &
+wait
+CUDA_VISIBLE_DEVICES=1 python main.py run 3 Config/config.yaml &
+CUDA_VISIBLE_DEVICES=2 python main.py run 4 Config/config.yaml &
+wait
+echo "END"
 
-
-
-# python main.py --seed=10  --gpu=0   --tag=test  --model=mlp  
-
-# 预测
-# files=$(ls -d /home/lxg/data/mpi/Logs/v1_mlp_0428/*/)
-# for file in $files
-# do
-#     echo predicting $file ...
-#     python predict.py --log_dir=$file
-# done
+# python post_analysis.py --name swint_config_baseline
