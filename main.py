@@ -83,7 +83,7 @@ def get_model(args):
         model = SwinTransformer(
             img_size=224,
             patch_size=4,
-            in_chans=len(args["D"]["img_keys"]),
+            in_chans=(len(args["D"]["img_keys"]), len(args["D"]["num_keys"])),
             num_classes=10,
             embed_dim=54,
             depths=[2, 2, 6, 2],
@@ -105,7 +105,7 @@ def get_model(args):
         )
         print(
             model_parameter,
-            file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"),
+            file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "w"),
         )
 
         hook1 = model.avgpool.register_forward_hook(callback["last_fea"])
@@ -120,8 +120,8 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     epoch = args["M"]["crt_epoch"]
     meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
     for img, num, lbl, ind in loader:
-        img = img.cuda()
-        num = num.cuda()
+        img = img.float().cuda()
+        num = num.float().cuda()
         y = lbl["MPI3_fixed"].float().cuda()
         ind = ind.float().cuda()
 
@@ -187,8 +187,8 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
         # criterion = HEMLoss(0)
         meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
         for img, num, lbl, ind in loader:
-            img = img.cuda()
-            num = num.cuda()
+            img = img.float().cuda()
+            num = num.float().cuda()
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             yhat, indhat = model(img, num)
@@ -247,8 +247,8 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             "indhat": Meter(),
         }
         for img, num, lbl, ind in loader:
-            img = img.cuda()
-            num = num.cuda()
+            img = img.float().cuda()
+            num = num.float().cuda()
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             yhat, indhat = model(img, num)
@@ -511,11 +511,9 @@ def get_list(cfg_path="origin.yaml", tag="base"):
         # time.sleep(1)
 
 
-def run_1_fold(index=0, cfg_path="origin.yaml", tag="base"):
-
-    # get_list(cfg_path, tag)
+def run_1_fold(cfg_path="origin.yaml", tag="base", index=0):
+    get_list(cfg_path, tag)
     args = parse_yaml(cfg_path)
-    # os.environ["CUDA_VISIBLE_DEVICES"] = str(args["M"]["device"])
     setup_seed(args["M"]["seed"])
     log_dir = os.path.join(
         args["M"]["log_dir"],
@@ -527,7 +525,7 @@ def run_1_fold(index=0, cfg_path="origin.yaml", tag="base"):
     )
     assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
     args["M"]["log_dir"] = os.path.join(log_dir, str(index))
-    print(f"[INFO] loading C-V record {index}.yaml")
+    print(f"[INFO] loading C-V record: {index}.yaml")
     data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
     train_list = data["train_list"]
     valid_list = data["valid_list"]
@@ -565,10 +563,10 @@ def run_all(cfg_path="origin.yaml", tag="base"):
         test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
         print(f"[INFO] start the pipline: {index}.yaml")
         # pipline(args, train_list, valid_list, test_list)
-        print("[INFO] Query the idle GPU")
+        print("[INFO] Query the idle GPU ...")
         os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
         memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
-        print(f"[INFO] the GPU:{np.argmax(memory_gpu)} was selected")
+        print(f"[INFO] GPU:{np.argmax(memory_gpu)} was selected")
         best_gpu = int(np.argmax(memory_gpu))
         os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
         # os.system("rm tmp")  # 删除临时生成的 tmp 文件
@@ -579,4 +577,5 @@ def run_all(cfg_path="origin.yaml", tag="base"):
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method("spawn")  # good solution !!!!
+    # fire.Fire(run_1_fold)
     fire.Fire(run_all)

@@ -11,4 +11,4 @@
 
 # python post_analysis.py --name swint_config_baseline
 
-python main.py Config/config.yaml base
+python main.py Config/config.yaml concat_before_head2

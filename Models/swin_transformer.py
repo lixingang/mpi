@@ -621,7 +621,7 @@ class SwinTransformer(nn.Module):
         self,
         img_size=224,
         patch_size=4,
-        in_chans=17,
+        in_chans=3,
         num_classes=10,
         embed_dim=96,
         depths=[2, 2, 6, 2],
@@ -653,7 +653,7 @@ class SwinTransformer(nn.Module):
         self.patch_embed = PatchEmbed(
             img_size=img_size,
             patch_size=patch_size,
-            in_chans=in_chans,
+            in_chans=in_chans[0],
             embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None,
         )
@@ -699,9 +699,28 @@ class SwinTransformer(nn.Module):
             )
             self.layers.append(layer)
 
+        # num_keys layers
+        self.num_layers = nn.Sequential(
+            nn.Linear(in_chans[1], 64),
+            # nn.LayerNorm(64),
+            nn.ReLU(inplace=True),
+            # nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            # nn.ReLU(inplace=True),
+        )
+
+        # head
         self.norm = norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
-        self.head = nn.Linear(self.num_features, num_classes)
+
+        self.head = nn.Sequential(
+            nn.Linear(self.num_features + 64, 256),
+            # nn.LayerNorm(512),
+            # nn.ReLU(inplace=True),
+            nn.Linear(256, self.num_classes),
+            nn.Sigmoid(),
+        )
+        # self.head = nn.Linear(self.num_features, 10)
 
         self.apply(self._init_weights)
 
@@ -740,11 +759,11 @@ class SwinTransformer(nn.Module):
         x = torch.flatten(x, 1)
         return x
 
-    def forward(self, x, num, aux={}):
-        num = num.to(torch.float32)
-        x = self.forward_features(x, num)
-        ind_hat = self.head(x)
-        ind_hat = torch.sigmoid(ind_hat)
+    def forward(self, img, num, aux={}):
+        img = self.forward_features(img)
+        num = self.num_layers(num)
+
+        ind_hat = self.head(torch.cat((img, num), dim=1))
 
         self.indicator_weights = torch.tensor(
             [

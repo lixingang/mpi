@@ -20,7 +20,7 @@ M:
     
 D:
   source: Data/nga_mpi.csv
-  data_dir: /home/lxg/data/mpi/Data/origin224
+  data_dir: /home/lxg/origin224
   img_keys:
     - BLUE
     - GREEN
