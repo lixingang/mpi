@@ -28,12 +28,10 @@ from multiprocessing import Process
 # import in-project packages
 from Losses.loss import *
 from Models import *
+from Models.LDS import get_lds_weights
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.base import parse_yaml, parse_log
 from Utils.base import setup_seed, Meter, SaveOutput, split_train_valid
-from Utils.torchsummary import model_info
-from Utils.LDS import get_lds_weights
-from Utils.gpu_manager import GPUManager
 
 
 def logging_setting(log_dir):
@@ -128,8 +126,8 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         # aux = {}
         yhat, indhat = model(img, num, aux)
-        loss1 = torch.nn.functional.mse_loss(yhat, y)
-        # loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
+        # loss1 = torch.nn.functional.mse_loss(yhat, y)
+        loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
         loss2 = torch.nn.functional.mse_loss(ind, indhat)
 
         loss = loss1 + 0.5 * loss2
@@ -572,7 +570,7 @@ def run_all(cfg_path="origin.yaml", tag="base"):
         # os.system("rm tmp")  # 删除临时生成的 tmp 文件
         p = Process(target=pipline, args=(args, train_list, valid_list, test_list))
         p.start()
-        time.sleep(10)
+        time.sleep(5)
 
 
 if __name__ == "__main__":

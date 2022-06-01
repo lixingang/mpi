@@ -2,7 +2,8 @@ import numpy as np
 import glob
 import os
 import pandas as pd
-import argparse
+import fire
+import matplotlib.pyplot as plt
 from Utils.base import parse_yaml, parse_log
 
 
@@ -27,8 +28,35 @@ def get_logs(logname):
     df.to_csv(f"Logs/{logname}/STAT_{logname}.csv", index=False)
 
 
+def get_indicator(logname="swint_config_base", mode="separate"):
+    columns = [
+        "Child mortality",
+        "Nutrition",
+        "School attendance",
+        "Years of schooling",
+        "Electricity",
+        "Drinking water",
+        "Sanitation",
+        "Housing",
+        "Cooking fuel",
+        "Assets",
+    ]
+    assert mode in ["separate", "total"]
+    if mode == "separate":
+        log_list = glob.glob(f"Logs/{logname}/*/")
+        plt.figure(figsize=(12, 20), dpi=300)
+        for i, log in enumerate(log_list):
+            print(f"正在输出{log}日志中的indicator分布...")
+            ind_lbl = pd.read_csv(os.path.join(log, "weight_indicator.csv")).to_numpy()
+            ind_hat = pd.read_csv(os.path.join(log, "weight_features.csv")).to_numpy()
+            ind_diff = np.abs(ind_hat - ind_lbl)
+            plt.subplot(5, 1, i + 1)
+            plt.boxplot(ind_diff)
+            plt.xticks(range(1, 11), columns)
+            plt.title(log)
+            plt.tight_layout()
+        plt.savefig("indicator_diff_abs.jpg")
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process some integers.")
-    parser.add_argument(f"--name", default="", type=str)
-    args = parser.parse_args()
-    get_logs(args.name)
+    fire.Fire()

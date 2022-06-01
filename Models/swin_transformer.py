@@ -5,10 +5,16 @@
 # Written by Ze Liu
 # --------------------------------------------------------
 
+from regex import F
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from Models.fds import FDS
+
+fds_config = dict(
+    feature_dim=1024, start_update=0, start_smooth=1, kernel="gaussian", ks=20, sigma=2
+)
 
 
 class Mlp(nn.Module):
@@ -702,7 +708,7 @@ class SwinTransformer(nn.Module):
         # num_keys layers
         self.num_layers = nn.Sequential(
             nn.Linear(in_chans[1], 64),
-            # nn.LayerNorm(64),
+            nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
             # nn.Linear(64, 64),
             # nn.LayerNorm(64),
@@ -713,16 +719,18 @@ class SwinTransformer(nn.Module):
         self.norm = norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
 
-        self.head = nn.Sequential(
-            nn.Linear(self.num_features + 64, 256),
-            # nn.LayerNorm(512),
-            # nn.ReLU(inplace=True),
-            nn.Linear(256, self.num_classes),
-            nn.Sigmoid(),
+        self.neck = nn.Sequential(
+            nn.Linear(self.num_features + 64, self.num_features),
+            nn.BatchNorm1d(self.num_features),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.num_features, self.num_features),
+            # nn.Sigmoid(),
         )
-        # self.head = nn.Linear(self.num_features, 10)
+        self.head = nn.Linear(self.num_features, 10)
 
         self.apply(self._init_weights)
+
+        self.FDS = FDS(**fds_config)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -762,9 +770,16 @@ class SwinTransformer(nn.Module):
     def forward(self, img, num, aux={}):
         img = self.forward_features(img)
         num = self.num_layers(num)
+        fea = torch.cat((img, num), dim=1)
+        fea = self.neck(fea)
 
-        ind_hat = self.head(torch.cat((img, num), dim=1))
+        if len(aux) != 0:
+            if aux["epoch"] >= fds_config["start_smooth"]:
+                fea = self.FDS.smooth(fea, aux["label"], aux["epoch"])
 
+        ind_hat = self.head(fea)
+        ind_hat = torch.sigmoid(ind_hat)
+        # ind_hat = self.head(img)
         self.indicator_weights = torch.tensor(
             [
                 1 / 6.0,

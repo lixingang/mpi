@@ -52,7 +52,7 @@ D:
     - conflict_num
     - place_num
     - poi_num
-    - water
+    # - water
     - lat
     - lon
     - year
