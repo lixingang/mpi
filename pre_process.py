@@ -185,7 +185,7 @@ not_norm_list = [
 ]
 
 
-def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin224"):
+def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin192"):
 
     os.makedirs(target_dir, exist_ok=True)
     mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
@@ -199,7 +199,7 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin224"):
                 continue
 
             if key in args["D"]["img_keys"]:
-                res[key] = np.reshape(content[key], (255, 255))[15:239, 15:239]
+                res[key] = np.reshape(content[key], (255, 255))[31:223, 31:223]
 
             if key in args["D"]["num_keys"]:
                 res[key] = content[key]
@@ -247,8 +247,8 @@ def tf2pth_reduce(source_dir="Data/raw_data", target_dir="Data/input_data2"):
             #     )
 
             #     pop = content["famale"] + content["male"]
-            #     res["sex"] = np.reshape(sex, (255, 255))[15:239, 15:239]
-            #     res["pop"] = np.reshape(pop, (255, 255))[15:239, 15:239]
+            #     res["sex"] = np.reshape(sex, (255, 255))[31:223, 31:223]
+            #     res["pop"] = np.reshape(pop, (255, 255))[31:223, 31:223]
 
             # if key in [
             #     "age_struct_child",
@@ -267,10 +267,10 @@ def tf2pth_reduce(source_dir="Data/raw_data", target_dir="Data/input_data2"):
             #     )
             #     age = specical_pop / total_pop
 
-            #     res["age"] = np.reshape(age, (255, 255))[15:239, 15:239]
+            #     res["age"] = np.reshape(age, (255, 255))[31:223, 31:223]
 
             if key in args["D"]["img_keys"]:
-                res[key] = np.reshape(content[key], (255, 255))[15:239, 15:239]
+                res[key] = np.reshape(content[key], (255, 255))[31:223, 31:223]
 
             if key in args["D"]["num_keys"]:
                 res[key] = content[key]

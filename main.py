@@ -79,14 +79,14 @@ def get_model(args):
 
     elif args["M"]["model"].lower() == "swint":
         model = SwinTransformer(
-            img_size=224,
+            img_size=args["M"]["img_size"],
             patch_size=4,
             in_chans=(len(args["D"]["img_keys"]), len(args["D"]["num_keys"])),
             num_classes=10,
             embed_dim=54,
             depths=[2, 2, 6, 2],
             num_heads=[3, 6, 12, 24],
-            window_size=7,
+            window_size=6,
             mlp_ratio=4.0,
             drop_rate=0.0,
             attn_drop_rate=0.0,
@@ -96,7 +96,12 @@ def get_model(args):
         model_parameter = summary(
             model,
             input_size=[
-                (1, len(args["D"]["img_keys"]), 224, 224),
+                (
+                    1,
+                    len(args["D"]["img_keys"]),
+                    args["M"]["img_size"],
+                    args["M"]["img_size"],
+                ),
                 (1, len(args["D"]["num_keys"])),
             ],
             verbose=0,
@@ -423,22 +428,18 @@ def pipline(args, train_list, valid_list, test_list):
 
 
 def get_list(cfg_path="origin.yaml", tag="base"):
-    # generate train valid test list
+
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
 
     log_dir = os.path.join(
         args["M"]["log_dir"],
-        args["M"]["model"]
-        + "_"
-        + os.path.splitext(os.path.basename(cfg_path))[0]
-        + "_"
-        + tag,
+        os.path.splitext(os.path.basename(cfg_path))[0] + "_" + tag,
     )
 
     if os.path.exists(log_dir):
         message = input(
-            "[INFO] found duplicate directories, whether to overwrite (Y/N)"
+            "[INFO] found duplicate directories, whether to overwrite (Y/N) "
         )
         if message.lower() == "y":
             print("[INFO] deleting the existing logs...")
@@ -480,12 +481,8 @@ def get_list(cfg_path="origin.yaml", tag="base"):
         yamlname = (
             os.path.join(
                 args["M"]["log_dir"],
-                args["M"]["model"]
-                + "_"
-                + os.path.splitext(os.path.basename(cfg_path))[0]
-                + "_"
-                + tag,
-                str(i),
+                os.path.splitext(os.path.basename(cfg_path))[0] + "_" + tag,
+                str(i + 1),
             )
             + ".yaml"
         )
@@ -515,11 +512,7 @@ def run_1_fold(cfg_path="origin.yaml", tag="base", index=0):
     setup_seed(args["M"]["seed"])
     log_dir = os.path.join(
         args["M"]["log_dir"],
-        args["M"]["model"]
-        + "_"
-        + os.path.splitext(os.path.basename(cfg_path))[0]
-        + "_"
-        + tag,
+        os.path.splitext(os.path.basename(cfg_path))[0] + "_" + tag,
     )
     assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
     args["M"]["log_dir"] = os.path.join(log_dir, str(index))
@@ -541,15 +534,11 @@ def run_all(cfg_path="origin.yaml", tag="base"):
     setup_seed(args["M"]["seed"])
     log_dir = os.path.join(
         args["M"]["log_dir"],
-        args["M"]["model"]
-        + "_"
-        + os.path.splitext(os.path.basename(cfg_path))[0]
-        + "_"
-        + tag,
+        os.path.splitext(os.path.basename(cfg_path))[0] + "_" + tag,
     )
     assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
 
-    for index in range(args["M"]["k"]):
+    for index in range(1, args["M"]["k"] + 1):
         args["M"]["log_dir"] = os.path.join(log_dir, str(index))
         print(f"[INFO] loading C-V record {index}.yaml")
         data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))

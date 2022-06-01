@@ -1,5 +1,6 @@
 M:
   model: swint
+  img_size: 224
   batch_size: 40
   seed: 1
   best_acc: 99

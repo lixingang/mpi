@@ -759,6 +759,7 @@ class SwinTransformer(nn.Module):
         # x = torch.cat((x, num), dim=1)
 
         x = self.patch_embed(x)
+
         for layer in self.layers:
             x = layer(x)
 
