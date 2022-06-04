@@ -10,7 +10,7 @@ import glob
 from Utils.base import parse_yaml
 
 
-args = parse_yaml("Config/config.yaml")
+args = parse_yaml("Config/swint192.yaml")
 NORM_MIN = {
     "conflict_num": 0.0,
     "tmm_sum": 2550.8984375,
@@ -184,7 +184,8 @@ not_norm_list = [
     "Number of Individual",
 ]
 
-
+# [31:  223, 31:  223]
+# [15:  239,15:  239]
 def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin192"):
 
     os.makedirs(target_dir, exist_ok=True)
@@ -193,6 +194,7 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin192"):
         it = tf.compat.v1.python_io.tf_record_iterator(os.path.join(source_dir, f))
 
         content = decode_example(next(it))
+
         res = {}
         for key in content.keys():
             if isinstance(content[key], list):
@@ -200,12 +202,13 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin192"):
 
             if key in args["D"]["img_keys"]:
                 res[key] = np.reshape(content[key], (255, 255))[31:223, 31:223]
-
+                res[key] = torch.from_numpy(res[key])
             if key in args["D"]["num_keys"]:
                 res[key] = content[key]
-
+                res[key] = torch.from_numpy(res[key])
             if key in args["D"]["label_keys"]:
                 res[key] = content[key]
+                res[key] = torch.from_numpy(res[key])
 
         # 在pth文件中加入nga_mpi中的额外信息
         dhsclust = int(content["DHSCLUST1"].item())
@@ -216,7 +219,9 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin192"):
         ].head()
 
         for (col_name, col_data) in search_result.iteritems():
-            res[col_name] = np.asarray([col_data.item()])
+            if isinstance(col_data.item(), str):
+                continue
+            res[col_name] = torch.from_numpy(np.asarray([col_data.item()]))
 
         save_name = f"nga_{year}_{dhsclust}.pth"
         torch.save(
@@ -224,8 +229,51 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin192"):
             os.path.join(target_dir, save_name),
             _use_new_zipfile_serialization=False,
         )
-
     # _get_info(target_dir)
+
+
+# def tf2pth(source_dir="Data/raw_data", target_dir="Data/origin224"):
+
+#     os.makedirs(target_dir, exist_ok=True)
+#     mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
+#     for f in tqdm(os.listdir(source_dir)):
+#         it = tf.compat.v1.python_io.tf_record_iterator(os.path.join(source_dir, f))
+
+#         content = decode_example(next(it))
+#         img_array = []
+#         res = {}
+#         for key in content.keys():
+#             if isinstance(content[key], list):
+#                 continue
+
+#             if key in args["D"]["img_keys"]:
+#                 img_array.append(np.reshape(content[key], (255, 255))[31:223, 31:223])
+#             if key in args["D"]["num_keys"]:
+#                 res[key] = content[key]
+#             if key in args["D"]["label_keys"]:
+#                 res[key] = content[key]
+
+#         img_array = np.stack(img_array, 0)
+#         res["img"] = img_array
+#         # 在pth文件中加入nga_mpi中的额外信息
+#         dhsclust = int(content["DHSCLUST1"].item())
+#         year = int(content["year"].item())
+
+#         search_result = mpi_indicator.loc[
+#             (mpi_indicator["DHSCLUST"] == dhsclust) & (mpi_indicator["Year"] == year)
+#         ].head()
+
+#         for (col_name, col_data) in search_result.iteritems():
+#             if isinstance(col_data.item(), str):
+#                 continue
+#             res[col_name] = torch.from_numpy(np.asarray([col_data.item()]))
+
+#         save_name = f"nga_{year}_{dhsclust}.pth"
+#         torch.save(
+#             res,
+#             os.path.join(target_dir, save_name),
+#             _use_new_zipfile_serialization=False,
+#         )
 
 
 def tf2pth_reduce(source_dir="Data/raw_data", target_dir="Data/input_data2"):

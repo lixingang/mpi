@@ -1,27 +1,27 @@
 M:
   model: swint
   img_size: 192
-  batch_size: 40
+  batch_size: 50
   seed: 1
   best_acc: 99
   best_weight_path: null
   epochs: 1000
   crt_epoch: 1
   device: 0
-  init_lr: 0.0001
+  init_lr: 0.001
   log_dir: Logs
   max_early_stop: 10
   restore_weight: null
   k: 5
   scheduler:
     milestones:
-      - 30
-      - 60
+      - 20
+      - 50
     gamma: 0.1
     
 D:
   source: Data/nga_mpi.csv
-  data_dir: /home/lxg/data/mpi/Data/origin192
+  data_dir: Data/origin192
   img_keys:
     - BLUE
     - GREEN
@@ -53,7 +53,6 @@ D:
     - conflict_num
     - place_num
     - poi_num
-    # - water
     - lat
     - lon
     - year

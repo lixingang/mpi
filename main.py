@@ -23,7 +23,9 @@ import pandas as pd
 from sklearn.model_selection import KFold
 from torchmetrics.functional import r2_score, mean_squared_error
 from torchinfo import summary
-from multiprocessing import Process
+
+# from multiprocessing import Process
+import torch.multiprocessing as mp
 
 # import in-project packages
 from Losses.loss import *
@@ -52,7 +54,9 @@ def get_model(args):
     callback = {}
     callback["last_fea"] = SaveOutput()
     callback["weights_fea"] = SaveOutput()
+
     if args["M"]["model"].lower() == "vit":
+
         model = ViT(
             num_patches=len(args["D"]["img_keys"]) + len(args["D"]["num_keys"]),
             patch_dim=args["D"]["in_channel"],
@@ -78,6 +82,8 @@ def get_model(args):
         hook2 = model.fclayer[4].register_forward_hook(callback["weights_fea"])
 
     elif args["M"]["model"].lower() == "swint":
+        callback["img_fea"] = SaveOutput()
+        callback["num_fea"] = SaveOutput()
         model = SwinTransformer(
             img_size=args["M"]["img_size"],
             patch_size=4,
@@ -86,8 +92,8 @@ def get_model(args):
             embed_dim=54,
             depths=[2, 2, 6, 2],
             num_heads=[3, 6, 12, 24],
-            window_size=6,
-            mlp_ratio=4.0,
+            window_size=int(args["M"]["img_size"] / 32),
+            mlp_ratio=2.0,
             drop_rate=0.0,
             attn_drop_rate=0.0,
             drop_path_rate=0.000,
@@ -108,11 +114,17 @@ def get_model(args):
         )
         print(
             model_parameter,
-            file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "w"),
+            file=open(os.path.join(args["M"]["log_dir"], "model_parameter.txt"), "w"),
+        )
+        print(
+            model,
+            file=open(os.path.join(args["M"]["log_dir"], "module_name.txt"), "w"),
         )
 
         hook1 = model.avgpool.register_forward_hook(callback["last_fea"])
         hook2 = model.head.register_forward_hook(callback["weights_fea"])
+        hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
+        hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
 
     return model, callback
 
@@ -122,23 +134,28 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     model.train()
     epoch = args["M"]["crt_epoch"]
     meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
+
     for img, num, lbl, ind in loader:
+
         img = img.float().cuda()
         num = num.float().cuda()
         y = lbl["MPI3_fixed"].float().cuda()
         ind = ind.float().cuda()
 
-        aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
+        # aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         # aux = {}
-        yhat, indhat = model(img, num, aux)
-        # loss1 = torch.nn.functional.mse_loss(yhat, y)
-        loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-        loss2 = torch.nn.functional.mse_loss(ind, indhat)
+        yhat, indhat = model(img, num)
+        loss1 = torch.nn.functional.mse_loss(yhat, y)
+        # loss2 = weighted_huber_loss(yhat, y, get_lds_weights(y))
+        # loss3 = torch.nn.functional.mse_loss(ind, indhat)
 
-        loss = loss1 + 0.5 * loss2
+        end = time.time()
+
+        loss = loss1
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
+
         meters["loss"].update(loss)
         meters["y"].update(y)
         meters["yhat"].update(yhat)
@@ -162,19 +179,19 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         f"[train] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f}"
     )
 
-    writer.add_scalar("Train/loss", acc["train/loss"], epoch)
-    writer.add_scalar("Train/r2", acc["train/r2"], epoch)
-    writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
+    # writer.add_scalar("Train/loss", acc["train/loss"], epoch)
+    # writer.add_scalar("Train/r2", acc["train/r2"], epoch)
+    # writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
     if args["FDS"]["is_fds"]:
         meters = {"y": Meter(), "feat": Meter()}
         with torch.no_grad():
             for img, num, lbl, ind in loader:
-                img = img.cuda()
-                num = num.cuda()
-                y = lbl["MPI3_fixed"].cuda()
-                other = {"epoch": epoch, "label": y}
-                yhat, _ = model(img, num, other)
+                img = img.float().cuda()
+                num = num.float().cuda()
+                y = lbl["MPI3_fixed"].float().cuda()
+                aux = {"epoch": epoch, "label": y}
+                yhat, _ = model(img, num, aux)
                 meters["feat"].update(callback["last_fea"].data)
                 meters["y"].update(y)
         model.FDS.update_last_epoch_stats(epoch)
@@ -195,10 +212,6 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             yhat, indhat = model(img, num)
-            loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-            loss2 = torch.nn.functional.mse_loss(indhat, ind)
-            loss = loss1 + loss2
-            meters["loss"].update(loss)
             if gp:
                 gp.append_testing_params(
                     callback["last_fea"].data,
@@ -209,7 +222,6 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             meters["yhat"].update(yhat)
 
         if gp:
-            print(model.state_dict().keys())
             indhat = gp.gp_run(
                 model.state_dict()["fclayer.3.weight"].cpu(),
                 model.state_dict()["fclayer.3.bias"].cpu(),
@@ -219,13 +231,12 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
         rmse = math.sqrt(
             mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         )
-        acc = {"valid/loss": meters["loss"].avg(), "valid/r2": r2, "valid/rmse": rmse}
+        acc = {"valid/r2": r2, "valid/rmse": rmse}
 
         logging.info(
             f"[valid] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
         )
 
-        writer.add_scalar("Valid/loss", acc["valid/loss"], epoch)
         writer.add_scalar("Valid/r2", acc["valid/r2"], epoch)
         writer.add_scalar("Valid/rmse", acc["valid/rmse"], epoch)
 
@@ -298,6 +309,8 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
 
         writer.add_scalar("Test/r2", acc["test/r2"], epoch)
         writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
+        writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
+        writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
 
         df = pd.DataFrame(
             {
@@ -328,14 +341,14 @@ def pipline(args, train_list, valid_list, test_list):
         mpi_dataset(args, train_list),
         batch_size=args["M"]["batch_size"],
         shuffle=True,
-        num_workers=4,
+        num_workers=3,
         pin_memory=True,
     )
     valid_loader = DataLoader(
         mpi_dataset(args, valid_list),
         batch_size=args["M"]["batch_size"],
         shuffle=True,
-        num_workers=4,
+        num_workers=3,
         pin_memory=True,
     )
     test_loader = DataLoader(
@@ -377,14 +390,16 @@ def pipline(args, train_list, valid_list, test_list):
             )
 
         # validation
-        if epoch % 5 == 0:
+        if epoch % 3 == 0:
             valid_acc = valid_epoch(
                 args, train_model, callback, valid_loader, writer, gp
             )
-            if valid_acc["valid/rmse"] < args["M"]["best_acc"]:
+            if valid_acc["valid/rmse"] <= args["M"]["best_acc"]:
                 args["M"]["best_acc"] = valid_acc["valid/rmse"]
                 args["M"]["best_weight_path"] = os.path.join(
-                    args["M"]["log_dir"], f"ep{epoch}.pth"
+                    args["M"]["log_dir"],
+                    "best_rmse.pth"
+                    # f"ep{epoch}.pth"
                 )
                 torch.save(train_model.state_dict(), args["M"]["best_weight_path"])
                 if args["GP"]["is_gp"]:
@@ -475,7 +490,7 @@ def get_list(cfg_path="origin.yaml", tag="base"):
             else:
                 train_part = train_part + fold[j]
 
-        train_index, valid_index = split_train_valid(np.array(train_part), [0.7, 0.3])
+        train_index, valid_index = split_train_valid(np.array(train_part), [0.75, 0.25])
         test_index = np.array(test_part)
 
         yamlname = (
@@ -506,7 +521,7 @@ def get_list(cfg_path="origin.yaml", tag="base"):
         # time.sleep(1)
 
 
-def run_1_fold(cfg_path="origin.yaml", tag="base", index=0):
+def run_1_fold(cfg_path="origin.yaml", tag="base", index=1):
     get_list(cfg_path, tag)
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
@@ -538,6 +553,7 @@ def run_all(cfg_path="origin.yaml", tag="base"):
     )
     assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
 
+    processes = []
     for index in range(1, args["M"]["k"] + 1):
         args["M"]["log_dir"] = os.path.join(log_dir, str(index))
         print(f"[INFO] loading C-V record {index}.yaml")
@@ -557,12 +573,15 @@ def run_all(cfg_path="origin.yaml", tag="base"):
         best_gpu = int(np.argmax(memory_gpu))
         os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
         # os.system("rm tmp")  # 删除临时生成的 tmp 文件
-        p = Process(target=pipline, args=(args, train_list, valid_list, test_list))
+        p = mp.Process(target=pipline, args=(args, train_list, valid_list, test_list))
         p.start()
+        processes.append(p)
         time.sleep(5)
+    for p in processes:
+        p.join()
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method("spawn")  # good solution !!!!
+    # torch.multiprocessing.set_start_method("spawn")  # good solution !!!!
     # fire.Fire(run_1_fold)
     fire.Fire(run_all)

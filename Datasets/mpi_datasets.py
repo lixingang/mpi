@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import os
 import sys
-import glob
+import glob, time
 import pandas as pd
 
 sys.path.append("/home/lxg/data/mpi/")
@@ -23,15 +23,14 @@ class mpi_dataset:
 
     def __getitem__(self, i):
         data = torch.load(self.datalist[i])
-
-        img = np.stack([data[k] for k in self.img_keys], -1)
-        img = np.transpose(img, (2, 0, 1))
-        num = np.stack([data[k] for k in self.num_keys], -1)
+        img = np.stack([data[k] for k in self.img_keys], 0)
+        # img = np.transpose(img, (2, 0, 1))
+        # img = data["img"]
+        num = np.stack([data[k] for k in self.num_keys], 0)
         lbl = {k: np.squeeze(np.stack(data[k], -1)) for k in self.label_keys}
         ind = {k: np.squeeze(np.stack(data[k], -1)) for k in self.indicator_keys}
         ind = np.stack([ind[k] for k in ind.keys()], -1)
         lbl["name"] = self.datalist[i]
-
         return img.squeeze(), num.squeeze(), lbl, ind
 
     def __len__(self):

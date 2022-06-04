@@ -29,7 +29,7 @@ def _get_lds_kernel_window(kernel, ks, sigma):
 
 def _get_bin_idx(x):
     # label = label.detach().cpu().numpy()
-    return min(int(x * np.float32(100)), 80)
+    return min(int(x * np.float32(100)), 90)
 
 
 def get_lds_weights(labels):

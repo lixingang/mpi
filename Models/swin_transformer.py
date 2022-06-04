@@ -13,7 +13,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from Models.fds import FDS
 
 fds_config = dict(
-    feature_dim=1024, start_update=0, start_smooth=1, kernel="gaussian", ks=20, sigma=2
+    feature_dim=432, start_update=0, start_smooth=1, kernel="gaussian", ks=10, sigma=2
 )
 
 
@@ -709,7 +709,7 @@ class SwinTransformer(nn.Module):
         self.num_layers = nn.Sequential(
             nn.Linear(in_chans[1], 64),
             nn.BatchNorm1d(64),
-            nn.ReLU(inplace=True),
+            # nn.ReLU(inplace=True),
             # nn.Linear(64, 64),
             # nn.LayerNorm(64),
             # nn.ReLU(inplace=True),
@@ -750,15 +750,14 @@ class SwinTransformer(nn.Module):
         return {"relative_position_bias_table"}
 
     def forward_features(self, x, num=None):
-
+        x = self.patch_embed(x)
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
+
         # num = num.view(num.shape[0], num.shape[1], 1, 1)
         # num = num.repeat(1, 1, 224, 224)
         # x = torch.cat((x, num), dim=1)
-
-        x = self.patch_embed(x)
 
         for layer in self.layers:
             x = layer(x)
@@ -777,10 +776,8 @@ class SwinTransformer(nn.Module):
         if len(aux) != 0:
             if aux["epoch"] >= fds_config["start_smooth"]:
                 fea = self.FDS.smooth(fea, aux["label"], aux["epoch"])
-
         ind_hat = self.head(fea)
         ind_hat = torch.sigmoid(ind_hat)
-        # ind_hat = self.head(img)
         self.indicator_weights = torch.tensor(
             [
                 1 / 6.0,

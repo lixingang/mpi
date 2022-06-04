@@ -11,8 +11,8 @@
 
 # python post_analysis.py --name swint_config_baseline
 
-CONFIG=swint192.yaml 
-TAG=lds
+CONFIG=swint224
+TAG=loss1
 
-python main.py Config/${CONFIG} ${TAG}
-python post_analysis get_logs ${CONFIG}_${TAG}
+python main.py Config/${CONFIG}.yaml ${TAG}
+python post_analysis.py get_logs ${CONFIG}_${TAG}
