@@ -3,6 +3,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal.windows import triang
 from collections import Counter
 from scipy.ndimage import convolve1d
+import torch
 
 
 def _get_lds_kernel_window(kernel, ks, sigma):
@@ -29,13 +30,14 @@ def _get_lds_kernel_window(kernel, ks, sigma):
 
 def _get_bin_idx(x):
     # label = label.detach().cpu().numpy()
-    return min(int(x * np.float32(100)), 90)
+    return min(int(x * np.float32(100)), 80)
 
 
 def get_lds_weights(labels):
     # preds, labels: [Ns,], "Ns" is the number of total samples
     # assign each label to its corresponding bin (start from 0)
     # with your defined get_bin_idx(), return bin_index_per_label: [Ns,]
+    labels = torch.squeeze(labels)
     bin_index_per_label = [_get_bin_idx(label) for label in labels]
     # calculate empirical (original) label distribution: [Nb,]
     # "Nb" is the number of bins
@@ -55,6 +57,6 @@ def get_lds_weights(labels):
     # print(bin_index_per_label)
     eff_num_per_label = [eff_label_dist[bin_idx] for bin_idx in bin_index_per_label]
 
-    weights = [np.float32(1 / x) for x in eff_num_per_label]
+    weights = torch.tensor([np.float32(1 / x) for x in eff_num_per_label]).cuda()
 
     return weights

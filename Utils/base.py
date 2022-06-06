@@ -103,7 +103,7 @@ class Meter(object):
         if isinstance(self.values[0], list):
             return list(np.concatenate(self.values).flatten())
         else:
-            return torch.cat(self.values, dim=dim)
+            return torch.cat(self.values, dim=dim).squeeze()
 
 
 """

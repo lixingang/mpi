@@ -13,7 +13,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from Models.fds import FDS
 
 fds_config = dict(
-    feature_dim=432, start_update=0, start_smooth=1, kernel="gaussian", ks=10, sigma=2
+    feature_dim=432, start_update=0, start_smooth=10, kernel="gaussian", ks=20, sigma=2
 )
 
 
@@ -709,8 +709,8 @@ class SwinTransformer(nn.Module):
         self.num_layers = nn.Sequential(
             nn.Linear(in_chans[1], 64),
             nn.BatchNorm1d(64),
-            # nn.ReLU(inplace=True),
-            # nn.Linear(64, 64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, 64),
             # nn.LayerNorm(64),
             # nn.ReLU(inplace=True),
         )
@@ -722,15 +722,41 @@ class SwinTransformer(nn.Module):
         self.neck = nn.Sequential(
             nn.Linear(self.num_features + 64, self.num_features),
             nn.BatchNorm1d(self.num_features),
-            nn.ReLU(inplace=True),
+            nn.ReLU(True),
             nn.Linear(self.num_features, self.num_features),
-            # nn.Sigmoid(),
         )
-        self.head = nn.Linear(self.num_features, 10)
+        self.head1 = nn.Sequential(
+            nn.Linear(self.num_features, 10),
+            nn.ReLU(True),
+        )
+        self.head2 = nn.Linear(10, 1)
 
         self.apply(self._init_weights)
 
         self.FDS = FDS(**fds_config)
+
+        self.indicator_weights = torch.nn.Parameter(
+            torch.tensor(
+                [
+                    1 / 6.0,
+                    1 / 6.0,
+                    1 / 6.0,
+                    1 / 6.0,
+                    1 / 18.0,
+                    1 / 18.0,
+                    1 / 18.0,
+                    1 / 18.0,
+                    1 / 18.0,
+                    1 / 18.0,
+                ]
+            )
+        )
+
+        self.calibrate_layer = nn.Sequential(
+            nn.Linear(self.num_features, self.num_features),
+            nn.ReLU(),
+            nn.Linear(self.num_features, self.num_features),
+        )
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -776,24 +802,13 @@ class SwinTransformer(nn.Module):
         if len(aux) != 0:
             if aux["epoch"] >= fds_config["start_smooth"]:
                 fea = self.FDS.smooth(fea, aux["label"], aux["epoch"])
-        ind_hat = self.head(fea)
-        ind_hat = torch.sigmoid(ind_hat)
-        self.indicator_weights = torch.tensor(
-            [
-                1 / 6.0,
-                1 / 6.0,
-                1 / 6.0,
-                1 / 6.0,
-                1 / 18.0,
-                1 / 18.0,
-                1 / 18.0,
-                1 / 18.0,
-                1 / 18.0,
-                1 / 18.0,
-            ]
-        ).cuda()
+        ind_hat = self.head1(fea)
+        x = self.head2(ind_hat)
+        # ind_hat = torch.sigmoid(ind_hat)
 
-        x = torch.sum(torch.mul(self.indicator_weights, ind_hat), dim=-1)
+        # self.indicator_weights = torch.nn.Parameter(self.indicator_weights)
+
+        # x = torch.sum(torch.mul(self.indicator_weights, ind_hat), dim=-1)
         return x, ind_hat
 
     def flops(self):

@@ -2,21 +2,22 @@ M:
   model: swint
   img_size: 224
   batch_size: 50
-  seed: 1
+  seed: 10
   best_acc: 99
   best_weight_path: null
   epochs: 1000
   crt_epoch: 1
   device: 0
-  init_lr: 0.0001
+  init_lr: 0.001
   log_dir: Logs
   max_early_stop: 10
   restore_weight: null
   k: 5
   scheduler:
     milestones:
+      - 10
       - 30
-      - 60
+      - 80
     gamma: 0.1
     
 D:
@@ -88,4 +89,4 @@ VIT:
   vit_dropout: 0.0
 
 FDS:
-  is_fds: 0
+  is_fds: 1
