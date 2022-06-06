@@ -53,7 +53,7 @@ def get_model(args):
     model = None
     callback = {}
     callback["last_fea"] = SaveOutput()
-    callback["weights_fea"] = SaveOutput()
+    # callback["weights_fea"] = SaveOutput()
 
     if args["M"]["model"].lower() == "vit":
 
@@ -70,7 +70,7 @@ def get_model(args):
         ).cuda()
         print(model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
         hook1 = model.mlp_head[0].register_forward_hook(callback["last_fea"])
-        hook2 = model.mlp_head[1].register_forward_hook(callback["weights_fea"])
+        # hook2 = model.mlp_head[1].register_forward_hook(callback["weights_fea"])
 
     elif args["M"]["model"].lower() == "mlp":
         model = MLP(
@@ -121,8 +121,8 @@ def get_model(args):
             file=open(os.path.join(args["M"]["log_dir"], "module_name.txt"), "w"),
         )
 
-        hook1 = model.avgpool.register_forward_hook(callback["last_fea"])
-        hook2 = model.head.register_forward_hook(callback["weights_fea"])
+        hook1 = model.neck[-1].register_forward_hook(callback["last_fea"])
+        # hook2 = model.head.register_forward_hook(callback["weights_fea"])
         hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
         hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
 
@@ -134,7 +134,8 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     model.train()
     epoch = args["M"]["crt_epoch"]
     meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
-
+    # criterion = BMCLoss(init_noise_sigma=0.1)
+    # optimizer.add_param_group({"params": criterion.noise_sigma, "name": "noise_sigma"})
     for img, num, lbl, ind in loader:
 
         img = img.float().cuda()
@@ -145,13 +146,15 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         # aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         # aux = {}
         yhat, indhat = model(img, num)
-        loss1 = torch.nn.functional.mse_loss(yhat, y)
+        # loss1 = weighted_mse_loss(y, yhat, get_lds_weights(y))
+        # loss1 = weighted_huber_loss(y, yhat, None, 1)
+        # print(yhat.shape, y.shape, ind.shape, indhat.shape)
+        loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
         # loss2 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-        # loss3 = torch.nn.functional.mse_loss(ind, indhat)
+        loss3 = weighted_huber_loss(ind, indhat)
+        # print(loss1, loss3)
 
-        end = time.time()
-
-        loss = loss1
+        loss = loss1 + loss3 * 0.1
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -222,7 +225,7 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             meters["yhat"].update(yhat)
 
         if gp:
-            indhat = gp.gp_run(
+            ygp = gp.gp_run(
                 model.state_dict()["fclayer.3.weight"].cpu(),
                 model.state_dict()["fclayer.3.bias"].cpu(),
             ).cuda()
@@ -564,11 +567,18 @@ def run_all(cfg_path="origin.yaml", tag="base"):
         train_list = [os.path.join(args["D"]["data_dir"], i) for i in train_list]
         valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
         test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
-        print(f"[INFO] start the pipline: {index}.yaml")
+
         # pipline(args, train_list, valid_list, test_list)
         print("[INFO] Query the idle GPU ...")
         os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
         memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+        while max(memory_gpu) < 5500:
+            time.sleep(20)
+            print("[INFO] Query the idle GPU ...")
+            os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
+            memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+
+        print(f"[INFO] start the pipline: {index}.yaml")
         print(f"[INFO] GPU:{np.argmax(memory_gpu)} was selected")
         best_gpu = int(np.argmax(memory_gpu))
         os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
@@ -576,7 +586,7 @@ def run_all(cfg_path="origin.yaml", tag="base"):
         p = mp.Process(target=pipline, args=(args, train_list, valid_list, test_list))
         p.start()
         processes.append(p)
-        time.sleep(5)
+        time.sleep(10)
     for p in processes:
         p.join()
 
