@@ -55,24 +55,7 @@ def get_model(args):
     callback["last_fea"] = SaveOutput()
     # callback["weights_fea"] = SaveOutput()
 
-    if args["M"]["model"].lower() == "vit":
-
-        model = ViT(
-            num_patches=len(args["D"]["img_keys"]) + len(args["D"]["num_keys"]),
-            patch_dim=args["D"]["in_channel"],
-            num_classes=10,
-            dim=args["VIT"]["vit_dim"],
-            depth=args["VIT"]["vit_depth"],
-            heads=args["VIT"]["vit_heads"],
-            mlp_dim=args["VIT"]["vit_mlp_dim"],
-            dropout=args["VIT"]["vit_dropout"],
-            emb_dropout=args["VIT"]["vit_dropout"],
-        ).cuda()
-        print(model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
-        hook1 = model.mlp_head[0].register_forward_hook(callback["last_fea"])
-        # hook2 = model.mlp_head[1].register_forward_hook(callback["weights_fea"])
-
-    elif args["M"]["model"].lower() == "mlp":
+    if args["M"]["model"].lower() == "mlp":
         model = MLP(
             len(args["D"]["img_keys"]) * args["D"]["in_channel"],
             len(args["D"]["num_keys"]),
@@ -90,8 +73,8 @@ def get_model(args):
             in_chans=(len(args["D"]["img_keys"]), len(args["D"]["num_keys"])),
             num_classes=10,
             embed_dim=54,
-            depths=[2, 2, 6, 2],
-            num_heads=[3, 6, 12, 24],
+            depths=[2, 2, 6],
+            num_heads=[3, 6, 12],
             window_size=int(args["M"]["img_size"] / 32),
             mlp_ratio=2.0,
             drop_rate=0.0,
@@ -121,11 +104,26 @@ def get_model(args):
             file=open(os.path.join(args["M"]["log_dir"], "module_name.txt"), "w"),
         )
 
-        hook1 = model.neck[-1].register_forward_hook(callback["last_fea"])
+        hook1 = model.head1[0].register_forward_hook(callback["last_fea"])
         # hook2 = model.head.register_forward_hook(callback["weights_fea"])
         hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
-        hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
+        # hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
 
+    # if args["M"]["model"].lower() == "vit":
+    #     model = ViT(
+    #         num_patches=len(args["D"]["img_keys"]) + len(args["D"]["num_keys"]),
+    #         patch_dim=args["D"]["in_channel"],
+    #         num_classes=10,
+    #         dim=args["VIT"]["vit_dim"],
+    #         depth=args["VIT"]["vit_depth"],
+    #         heads=args["VIT"]["vit_heads"],
+    #         mlp_dim=args["VIT"]["vit_mlp_dim"],
+    #         dropout=args["VIT"]["vit_dropout"],
+    #         emb_dropout=args["VIT"]["vit_dropout"],
+    #     ).cuda()
+    #     print(model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
+    #     hook1 = model.mlp_head[0].register_forward_hook(callback["last_fea"])
+    #     # hook2 = model.mlp_head[1].register_forward_hook(callback["weights_fea"])
     return model, callback
 
 
@@ -146,15 +144,15 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         # aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         # aux = {}
         yhat, indhat = model(img, num)
-        # loss1 = weighted_mse_loss(y, yhat, get_lds_weights(y))
-        # loss1 = weighted_huber_loss(y, yhat, None, 1)
-        # print(yhat.shape, y.shape, ind.shape, indhat.shape)
-        loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-        # loss2 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-        loss3 = weighted_huber_loss(ind, indhat)
+        loss1 = weighted_focal_mse_loss(y, yhat)
+        # loss1 = weighted_huber_loss(y, yhat,get_lds_weights(y))
+        # loss1 = weighted_huber_loss(y, yhat, get_lds_weights(y), 1)
+        # loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
+        loss2 = weighted_focal_mse_loss(yhat, y)
+        # loss3 = weighted_huber_loss(ind, indhat)
         # print(loss1, loss3)
 
-        loss = loss1 + loss3 * 0.1
+        loss = loss1 + 0.01 * loss2
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -187,7 +185,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     # writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
     if args["FDS"]["is_fds"]:
-        meters = {"y": Meter(), "feat": Meter()}
+        meters = {"y": Meter(), "img_fea": Meter(), "num_fea": Meter()}
         with torch.no_grad():
             for img, num, lbl, ind in loader:
                 img = img.float().cuda()
@@ -195,10 +193,17 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
                 y = lbl["MPI3_fixed"].float().cuda()
                 aux = {"epoch": epoch, "label": y}
                 yhat, _ = model(img, num, aux)
-                meters["feat"].update(callback["last_fea"].data)
+                meters["img_fea"].update(callback["img_fea"].data)
+                # meters["num_fea"].update(callback["num_fea"].data)
                 meters["y"].update(y)
-        model.FDS.update_last_epoch_stats(epoch)
-        model.FDS.update_running_stats(meters["feat"].cat(), meters["y"].cat(), epoch)
+        model.FDS1.update_last_epoch_stats(epoch)
+        model.FDS1.update_running_stats(
+            meters["img_fea"].cat(), meters["y"].cat(), epoch
+        )
+        # model.FDS2.update_last_epoch_stats(epoch)
+        # model.FDS2.update_running_stats(
+        #     meters["num_fea"].cat(), meters["y"].cat(), epoch
+        # )
     return acc
 
 
@@ -224,12 +229,6 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             meters["y"].update(y)
             meters["yhat"].update(yhat)
 
-        if gp:
-            ygp = gp.gp_run(
-                model.state_dict()["fclayer.3.weight"].cpu(),
-                model.state_dict()["fclayer.3.bias"].cpu(),
-            ).cuda()
-
         r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         rmse = math.sqrt(
             mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
@@ -239,6 +238,20 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
         logging.info(
             f"[valid] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
         )
+
+        if gp:
+            ygp = gp.gp_run(
+                model.state_dict()["head1.1.weight"].cpu(),
+                model.state_dict()["head1.1.bias"].cpu(),
+            )
+            r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
+            rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
+
+            acc = {"valid/r2": r2, "valid/rmse": rmse}
+
+            logging.info(
+                f"[gp-valid] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
+            )
 
         writer.add_scalar("Valid/r2", acc["valid/r2"], epoch)
         writer.add_scalar("Valid/rmse", acc["valid/rmse"], epoch)
@@ -295,11 +308,6 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             delimiter=",",
             fmt="%.3f",
         )
-        if args["GP"]["is_gp"]:
-            yhat = gp.gp_run(
-                model.state_dict()["fclayer.3.weight"].cpu(),
-                model.state_dict()["fclayer.3.bias"].cpu(),
-            ).cuda()
 
         r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         rmse = math.sqrt(
@@ -310,10 +318,23 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
         logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
         logging.info(f"[test] r2={r2:.3f} rmse={rmse:.4f}")
 
+        if gp:
+            ygp = gp.gp_run(
+                model.state_dict()["head1.1.weight"].cpu(),
+                model.state_dict()["head1.1.bias"].cpu(),
+            )
+            r2 = r2_score(ygp, meters["y"].cat()).numpy().item()
+            rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
+            acc = {"test/r2": r2, "test/rmse": rmse}
+
+            logging.info(
+                f"[gp-test] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
+            )
+
         writer.add_scalar("Test/r2", acc["test/r2"], epoch)
         writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
-        writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
-        writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
+        # writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
+        # writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
 
         df = pd.DataFrame(
             {
@@ -330,6 +351,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
 
 
 def pipline(args, train_list, valid_list, test_list):
+
     if os.path.exists(args["M"]["log_dir"]):
         shutil.rmtree(args["M"]["log_dir"])
     logging_setting(args["M"]["log_dir"])
@@ -393,11 +415,11 @@ def pipline(args, train_list, valid_list, test_list):
             )
 
         # validation
-        if epoch % 3 == 0:
+        if epoch % 10 == 0:
             valid_acc = valid_epoch(
                 args, train_model, callback, valid_loader, writer, gp
             )
-            if valid_acc["valid/rmse"] <= args["M"]["best_acc"]:
+            if valid_acc["valid/rmse"] < args["M"]["best_acc"]:
                 args["M"]["best_acc"] = valid_acc["valid/rmse"]
                 args["M"]["best_weight_path"] = os.path.join(
                     args["M"]["log_dir"],
@@ -407,7 +429,7 @@ def pipline(args, train_list, valid_list, test_list):
                 torch.save(train_model.state_dict(), args["M"]["best_weight_path"])
                 if args["GP"]["is_gp"]:
                     args["M"]["best_gp_path"] = args["M"]["best_weight_path"].replace(
-                        "ep", "gp_ep"
+                        "rmse", "gp"
                     )
                     gp.save(args["M"]["best_gp_path"])
 
@@ -445,7 +467,7 @@ def pipline(args, train_list, valid_list, test_list):
     return "OK"
 
 
-def get_list(cfg_path="origin.yaml", tag="base"):
+def get_list(cfg_path="origin.yaml", tag="lds"):
 
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
@@ -523,15 +545,30 @@ def get_list(cfg_path="origin.yaml", tag="base"):
         print(f"[INFO] creating C-V record: {yamlname}")
         # time.sleep(1)
 
+    return log_dir
+
 
 def run_1_fold(cfg_path="origin.yaml", tag="base", index=1):
-    get_list(cfg_path, tag)
+    # select gpu
+    print("[INFO] Query the idle GPU ...")
+    os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
+    memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+    while max(memory_gpu) < 5500:
+        time.sleep(20)
+        print("[INFO] Query the idle GPU ...")
+        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
+        memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+
+    print(f"[INFO] start the pipline: {index}.yaml")
+    print(f"[INFO] GPU:{np.argmax(memory_gpu)} was selected")
+    best_gpu = int(np.argmax(memory_gpu))
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
+
+    # start pipline
+    log_dir = get_list(cfg_path, tag)
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
-    log_dir = os.path.join(
-        args["M"]["log_dir"],
-        os.path.splitext(os.path.basename(cfg_path))[0] + "_" + tag,
-    )
+
     assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
     args["M"]["log_dir"] = os.path.join(log_dir, str(index))
     print(f"[INFO] loading C-V record: {index}.yaml")
@@ -546,18 +583,19 @@ def run_1_fold(cfg_path="origin.yaml", tag="base", index=1):
     pipline(args, train_list, valid_list, test_list)
 
 
-def run_all(cfg_path="origin.yaml", tag="base"):
-    get_list(cfg_path, tag)
+def run_all(cfg_path="Config/swint.yaml", tag="base", indexs=None):
+    log_dir = get_list(cfg_path, tag)
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
-    log_dir = os.path.join(
-        args["M"]["log_dir"],
-        os.path.splitext(os.path.basename(cfg_path))[0] + "_" + tag,
-    )
+
     assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
 
     processes = []
-    for index in range(1, args["M"]["k"] + 1):
+    if indexs == None:
+        run_indexs = range(1, args["M"]["k"] + 1)
+    else:
+        run_indexs = indexs
+    for index in run_indexs:
         args["M"]["log_dir"] = os.path.join(log_dir, str(index))
         print(f"[INFO] loading C-V record {index}.yaml")
         data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
@@ -594,4 +632,4 @@ def run_all(cfg_path="origin.yaml", tag="base"):
 if __name__ == "__main__":
     # torch.multiprocessing.set_start_method("spawn")  # good solution !!!!
     # fire.Fire(run_1_fold)
-    fire.Fire(run_all)
+    fire.Fire()

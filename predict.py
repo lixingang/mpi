@@ -227,7 +227,7 @@ def pipline(log_dir="Logs/swint224_loss1"):
                 "last_fea": meters["last_fea"].cat(),
             }
 
-            # count_analysis(df, cv_index, writer)
+            count_analysis(df, cv_index, writer)
             feature_statistics(df, cv_index, writer)
 
     writer.close()

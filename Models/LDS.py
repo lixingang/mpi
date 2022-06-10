@@ -10,7 +10,8 @@ def _get_lds_kernel_window(kernel, ks, sigma):
     assert kernel in ["gaussian", "tria ng", "laplace"]
     half_ks = (ks - 1) // 2
     if kernel == "gaussian":
-        base_kernel = [0.0] * half_ks + [1.0] + [0.0] * half_ks
+        # base_kernel = [0.0] * half_ks + [1.0] + [0.0] * half_ks
+        base_kernel = [0.1] * half_ks + [1.0] + [0.1] * half_ks
         kernel_window = gaussian_filter1d(base_kernel, sigma=sigma) / max(
             gaussian_filter1d(base_kernel, sigma=sigma)
         )
@@ -30,7 +31,7 @@ def _get_lds_kernel_window(kernel, ks, sigma):
 
 def _get_bin_idx(x):
     # label = label.detach().cpu().numpy()
-    return min(int(x * np.float32(100)), 80)
+    return min(int(x * np.float32(50)), 48)
 
 
 def get_lds_weights(labels):
@@ -56,7 +57,7 @@ def get_lds_weights(labels):
     # print(len(eff_label_dist),eff_label_dist)
     # print(bin_index_per_label)
     eff_num_per_label = [eff_label_dist[bin_idx] for bin_idx in bin_index_per_label]
-
+    # print(eff_num_per_label)
     weights = torch.tensor([np.float32(1 / x) for x in eff_num_per_label]).cuda()
 
     return weights

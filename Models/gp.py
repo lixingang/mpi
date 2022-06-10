@@ -49,6 +49,7 @@ class GaussianProcess:
         model_weights,
         model_bias,
     ):
+        # (1332, 2) (445, 2) (1332,) (445,)
 
         # makes sure the features have an additional testue for the bias term
         # We call the features H since the features are used as the basis functions h(x)
@@ -60,7 +61,7 @@ class GaussianProcess:
         H_train = torch.cat((feat_train, torch.ones((feat_train.shape[0], 1))), dim=1)
         H_test = torch.cat((feat_test, torch.ones((feat_test.shape[0], 1))), dim=1)
 
-        Y_train = np.expand_dims(train_yield, axis=1)
+        Y_train = train_yield
         Y_train = torch.from_numpy(Y_train)
 
         n_train = feat_train.shape[0]
@@ -89,15 +90,11 @@ class GaussianProcess:
         # its easy to calculate the inverse of B
         B_inv = torch.eye(H_train.shape[1]) / self.sigma_b
         # "We choose b as the weight vector of the last layer of our deep models"
-        b = torch.cat(
-            (
-                model_weights.transpose(1, 0),
-                torch.from_numpy(np.expand_dims(model_bias, 0)),
-            )
-        )
+        model_bias = torch.from_numpy(np.expand_dims(model_bias, 0))
+
+        b = torch.cat((model_weights.transpose(1, 0), model_bias))
         K_inv = torch.linalg.inv(kernel[0:n_train, 0:n_train]).to(torch.float32)
         # The definition of beta comes from equation 2.41 in Rasmussen (2006)
-        # print(H_train.dtype,K_inv.dtype ,B_inv.dtype,b.dtype,Y_train.dtype)
         beta = torch.linalg.inv(B_inv + H_train.T.mm(K_inv).mm(H_train)).mm(
             H_train.T.mm(K_inv).mm(Y_train) + B_inv.mm(b)
         )
@@ -105,7 +102,6 @@ class GaussianProcess:
         pred = H_test.mm(beta) + kernel[n_train:, :n_train].mm(K_inv).mm(
             Y_train - H_train.mm(beta)
         )
-        print(pred.shape)
         return pred
 
 
@@ -123,14 +119,14 @@ class gp_model(GaussianProcess):
 
     def append_training_params(self, feat, year, loc, y):
         self.train_feat.append(feat)
-        self.train_year.append(year)
-        self.train_loc.append(loc)
+        self.train_year.append(np.squeeze(year))
+        self.train_loc.append(np.squeeze(loc))
         self.train_y.append(y)
 
     def append_testing_params(self, feat, year, loc):
         self.test_feat.append(feat)
-        self.test_year.append(year)
-        self.test_loc.append(loc)
+        self.test_year.append(np.squeeze(year))
+        self.test_loc.append(np.squeeze(loc))
 
     def gp_run(
         self,
@@ -144,6 +140,7 @@ class gp_model(GaussianProcess):
         test_feat = np.concatenate(self.test_feat, axis=0)
         test_loc = np.concatenate(self.test_loc, axis=0)
         test_year = np.concatenate(self.test_year, axis=0)
+
         gp_pred = self.run(
             train_feat,
             test_feat,
@@ -198,7 +195,6 @@ class gp_model(GaussianProcess):
         self.test_feat = []
         self.test_loc = []
         self.test_year = []
-        # self.test_y = []
         self.train_feat = []
         self.train_year = []
         self.train_loc = []
