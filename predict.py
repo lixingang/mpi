@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader, ConcatDataset
 from torch.optim.lr_scheduler import StepLR, LambdaLR, MultiStepLR
 import logging
 import argparse
-import h5py
 import glob
 import time
 import random
@@ -18,10 +17,10 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
-import torchmetrics
 import pandas as pd
 import fire
 from torchmetrics.functional import r2_score, mean_squared_error
+from sklearn.linear_model import LinearRegression
 from torch.utils.tensorboard import SummaryWriter
 
 # import in-project packages
@@ -29,9 +28,7 @@ from Losses.loss import HEMLoss, CenterLoss
 from Models import *
 from Datasets.mpi_datasets import mpi_dataset
 from main import get_model
-from Utils.base import parse_yaml
-
-sys.path.append("./Metrics")
+from Utils.base import parse_yaml, parse_log
 
 
 def logging_setting():
@@ -48,7 +45,7 @@ def count_analysis(df, cv_index, writer):
     y = np.array(df["y"])
     y_hat = np.array(df["yhat"])
     diff = np.abs(y - y_hat)
-    hist_index, iter_list = get_hist(y, 0.0, 1.0, 0.05)
+    hist_index, iter_list = get_hist(y, 0.0, 0.9, 0.05)
     hist_count = [len(hist_index[k]) for k in hist_index.keys()]
     hist_error = []
     for key in hist_index.keys():
@@ -99,7 +96,7 @@ def feature_statistics(df, cv_index, writer):
     # img_fea = np.array(df["img_fea"])
     # num_fea = np.array(df["num_fea"])
     all_fea = np.array(df["last_fea"])
-    hist_index, iter_list = get_hist(y, 0.0, 1.0, 0.02)
+    hist_index, iter_list = get_hist(y, 0.0, 0.9, 0.02)
 
     hist_fea = {"Mean": [], "Variance": []}
     for key in hist_index.keys():
@@ -134,7 +131,7 @@ def feature_statistics(df, cv_index, writer):
         writer.add_figure(f"{cv_index}_{key}_feature_statistics", f)
 
 
-def get_hist(y, min_value=0.0, maxs_value=1.0, step=0.01):
+def get_hist(y, min_value=0.0, maxs_value=0.9, step=0.01):
     sorted_id = sorted(range(len(y)), key=lambda k: y[k])
     y = np.array([y[i] for i in sorted_id])
     hist_index = {}
@@ -151,6 +148,17 @@ def pipline(log_dir="Logs/swint224_loss1"):
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     writer = SummaryWriter(log_dir=log_dir)
     # read config
+    meters = {
+        "y": Meter(),
+        "yhat": Meter(),
+        "name": Meter(),
+        "lon": Meter(),
+        "lat": Meter(),
+        "ind": Meter(),
+        "indhat": Meter(),
+        "img_fea": Meter(),
+        "last_fea": Meter(),
+    }
     for fold in glob.glob(f"{log_dir}/*/"):
         cv_index = os.path.basename(os.path.dirname(fold))
         args = parse_yaml(os.path.join(fold, "config.yaml"))
@@ -169,26 +177,33 @@ def pipline(log_dir="Logs/swint224_loss1"):
             model.eval()
             epoch = args["M"]["crt_epoch"]
             model.load_state_dict(torch.load(args["M"]["best_weight_path"]))
+            if args["GP"]["is_gp"]:
+                gp = gp_model(sigma=1, r_loc=2.5, r_year=10, sigma_e=0.32, sigma_b=0.01)
+                gp.restore(args["GP"]["best_gp_path"])
 
-            meters = {
-                "y": Meter(),
-                "yhat": Meter(),
-                "name": Meter(),
-                "lon": Meter(),
-                "lat": Meter(),
-                "ind": Meter(),
-                "indhat": Meter(),
-                "img_fea": Meter(),
-                "num_fea": Meter(),
-                "last_fea": Meter(),
-            }
-            for img, num, lbl, ind in loader:
+            # meters = {
+            #     "y": Meter(),
+            #     "yhat": Meter(),
+            #     "name": Meter(),
+            #     "lon": Meter(),
+            #     "lat": Meter(),
+            #     "ind": Meter(),
+            #     "indhat": Meter(),
+            #     "img_fea": Meter(),
+            #     "last_fea": Meter(),
+            # }
+            for img, _, lbl, ind in loader:
                 img = img.float().cuda()
-                num = num.float().cuda()
                 y = lbl["MPI3_fixed"].float().cuda()
                 ind = ind.float().cuda()
-                yhat, indhat = model(img, num)
-
+                yhat, indhat, _ = model(img, 999)
+                if args["GP"]["is_gp"]:
+                    gp.append_testing_params(
+                        callback["last_fea"].data,
+                        lbl["year"].item(),
+                        lbl["poi_num"].item(),
+                        np.stack([lbl["lat"], lbl["lon"]], -1),
+                    )
                 meters["y"].update(y)
                 meters["yhat"].update(yhat)
                 meters["name"].update(lbl["name"])
@@ -197,42 +212,124 @@ def pipline(log_dir="Logs/swint224_loss1"):
                 meters["ind"].update(ind)
                 meters["indhat"].update(indhat)
                 meters["img_fea"].update(callback["img_fea"].data)
-                meters["num_fea"].update(callback["num_fea"].data)
                 meters["last_fea"].update(callback["last_fea"].data)
 
-            r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
-            rmse = math.sqrt(
-                mean_squared_error(meters["yhat"].cat(), meters["y"].cat())
-                .numpy()
-                .item()
-            )
-            # acc = {"test/r2": r2, "test/rmse": rmse}
+            if args["GP"]["is_gp"]:
+                ygp = gp.gp_run(
+                    model.state_dict()["head1.1.weight"].cpu(),
+                    model.state_dict()["head1.1.bias"].cpu(),
+                )
 
-            logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
-            logging.info(f"[test] r2={r2:.3f} rmse={rmse:.4f}")
+            # r2 = r2_score(ygp, meters["y"].cat()).numpy().item()
+            # rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
+
+            # logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
+            # logging.info(f"[test] r2={r2:.3f} rmse={rmse:.4f}")
 
             # writer.add_scalar("Test/r2", acc["test/r2"], epoch)
             # writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
             # writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
             # writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
 
-            df = {
-                "name": meters["name"].cat(),
-                "y": meters["y"].cat(),
-                "yhat": meters["yhat"].cat(),
-                "lon": meters["lon"].cat(),
-                "lat": meters["lat"].cat(),
-                "img_fea": meters["img_fea"].cat(),
-                "num_fea": meters["num_fea"].cat(),
-                "last_fea": meters["last_fea"].cat(),
-            }
+    df = {
+        "name": meters["name"].cat(),
+        "y": meters["y"].cat(),
+        "yhat": meters["yhat"].cat(),
+        "lon": meters["lon"].cat(),
+        "lat": meters["lat"].cat(),
+        "img_fea": meters["img_fea"].cat(),
+        # "num_fea": meters["num_fea"].cat(),
+        "last_fea": meters["last_fea"].cat(),
+    }
 
-            count_analysis(df, cv_index, writer)
-            feature_statistics(df, cv_index, writer)
+    count_analysis(df, cv_index, writer)
+    feature_statistics(df, cv_index, writer)
 
     writer.close()
 
 
+def get_logs(logname):
+    items = {"name": [], "seed": [], "r2": [], "rmse": [], "mape": []}
+    log_list = glob.glob(f"Logs/{logname}/*/")
+    for log in log_list:
+        cfg = parse_yaml(os.path.join(log, "config.yaml"))
+        r2, rmse, mape = parse_log(os.path.join(log, "run.log"))
+        items["name"].append(log)
+        items["seed"].append(cfg["M"]["seed"])
+        items["r2"].append(r2)
+        items["rmse"].append(rmse)
+        items["mape"].append(mape)
+    items["name"].append("Average")
+    items["seed"].append("-1")
+    items["r2"].append(np.average([float(i) for i in items["r2"]]))
+    items["rmse"].append(np.average([float(i) for i in items["rmse"]]))
+    items["mape"].append(np.average([float(i) for i in items["mape"]]))
+    # print(items)
+    df = pd.DataFrame(items, index=None)
+    df.to_csv(f"Logs/{logname}/STAT_{logname}.csv", index=False)
+
+
+def plot_ind(logname="swint_config_base", mode="separate"):
+    columns = [
+        "Child mortality",
+        "Nutrition",
+        "School attendance",
+        "Years of schooling",
+        "Electricity",
+        "Drinking water",
+        "Sanitation",
+        "Housing",
+        "Cooking fuel",
+        "Assets",
+    ]
+    assert mode in ["separate", "total"]
+    if mode == "separate":
+        log_list = glob.glob(f"Logs/{logname}/*/")
+        plt.figure(figsize=(10, 25), dpi=300)
+
+        for i, log in enumerate(log_list):
+            print(f"正在输出{log}日志中的indicator分布...")
+            ind_lbl = pd.read_csv(os.path.join(log, "ind.csv")).to_numpy()
+            ind_hat = pd.read_csv(os.path.join(log, "ind_hat.csv")).to_numpy()
+
+            ind_diff = np.abs(ind_hat - ind_lbl)
+            plt.subplot(5, 1, i + 1)
+            plt.boxplot(ind_diff)
+            plt.xticks(range(1, 11), columns)
+            plt.title(log)
+            plt.tight_layout()
+
+        plt.savefig(os.path.join(log, "indicator_diff_abs.jpg"))
+
+        plt.figure(figsize=(25, 10), dpi=300)
+        for i, log in enumerate(log_list):
+            print(f"正在输出{log}日志中的决定系数r2...")
+            ind_lbl = pd.read_csv(os.path.join(log, "ind.csv"))
+            ind_hat = pd.read_csv(os.path.join(log, "ind_hat.csv"))
+
+            ind_diff = np.abs(ind_hat - ind_lbl)
+            for i, c in enumerate(columns):
+                plt.subplot(2, 5, i + 1)
+                x, y = ind_lbl[c], ind_hat[c]
+                # linear_model = LinearRegression()
+                # linear_model.fit(x, y)
+                # y_p = linear_model.predict(x)
+
+                r2 = r2_score(x, y)
+                plt.scatter(x, y)
+                plt.xlabel("True")
+                plt.ylabel("Predict")
+                plt.title(c, fontsize=16)
+                # plt.plot(x, y_p, color="r")
+                plt.xlim(0, 1)
+                plt.ylim(0, 1)
+                plt.text(0.1, 0.9, f"$r^2$={round(r2,3)}", fontsize=16)
+                plt.tight_layout()
+
+            plt.savefig(os.path.join(log, "indicator_r2.jpg"))
+            break
+
+
 if __name__ == "__main__":
 
-    fire.Fire(pipline)
+    fire.Fire()

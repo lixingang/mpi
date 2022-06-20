@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from Models.fds import FDS
+from entmax import sparsemax, entmax15, entmax_bisect
 
 
 class Mlp(nn.Module):
@@ -181,9 +182,11 @@ class WindowAttention(nn.Module):
                 1
             ).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
-            attn = self.softmax(attn)
+            # attn = self.softmax(attn)
+            attn = sparsemax(attn, dim=-1)
         else:
-            attn = self.softmax(attn)
+            # attn = self.softmax(attn)
+            attn = sparsemax(attn, dim=-1)
 
         attn = self.attn_drop(attn)
 
@@ -702,29 +705,31 @@ class SwinTransformer(nn.Module):
             self.layers.append(layer)
 
         # num_keys layers
-        # self.num_layers = nn.Sequential(
-        #     nn.Linear(in_chans[1], 64),
-        #     nn.BatchNorm1d(64),
-        #     # nn.Linear(64, 64),
-        #     # nn.LayerNorm(64),
-        #     # nn.ReLU(inplace=True),
-        # )
+        self.num_layers = nn.Sequential(
+            nn.Linear(in_chans[1], 64),
+            nn.BatchNorm1d(64),
+            nn.Linear(64, 64),
+            # nn.LayerNorm(64),
+            # nn.ReLU(inplace=True),
+        )
 
-        # head
         self.norm = norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
 
-        # self.neck = nn.Sequential(
-        #     nn.Linear(self.num_features + 64, self.num_features),
-        #     nn.BatchNorm1d(self.num_features),
-        #     # nn.ReLU(True),
-        #     # nn.Linear(self.num_features, self.num_features),
-        # )
+        self.neck = nn.Sequential(
+            nn.Linear(self.num_features + 64, self.num_features),
+            nn.BatchNorm1d(self.num_features),
+            # nn.ReLU(True),
+            # nn.Linear(self.num_features, self.num_features),
+        )
+
+        # head
+
         self.head1 = nn.Sequential(
             nn.Linear(self.num_features, self.num_features),
             nn.Linear(self.num_features, 1),
         )
-        self.head2 = nn.Sequential(nn.Linear(self.num_features, 10))
+        self.head2 = nn.Sequential(nn.Linear(self.num_features, 10), nn.Sigmoid())
 
         self.apply(self._init_weights)
 
@@ -736,17 +741,17 @@ class SwinTransformer(nn.Module):
             ks=10,
             sigma=2,
         )
-        # self.fds_config2 = dict(
-        #     feature_dim=64,
-        #     start_update=0,
-        #     start_smooth=10,
-        #     kernel="gaussian",
-        #     ks=5,
-        #     sigma=2,
-        # )
+        self.fds_config2 = dict(
+            feature_dim=64,
+            start_update=0,
+            start_smooth=10,
+            kernel="gaussian",
+            ks=5,
+            sigma=2,
+        )
 
         self.FDS1 = FDS(**self.fds_config1)
-        # self.FDS2 = FDS(**self.fds_config2)
+        self.FDS2 = FDS(**self.fds_config2)
 
         # self.indicator_weights = torch.nn.Parameter(
         #     torch.tensor(
@@ -755,11 +760,11 @@ class SwinTransformer(nn.Module):
         #     )
         # )
 
-        self.calibrated_layer = nn.Sequential(
-            nn.Linear(self.num_features, self.num_features),
-            nn.ReLU(),
-            nn.Linear(self.num_features, self.num_features),
-        )
+        # self.calibrated_layer = nn.Sequential(
+        #     nn.Linear(self.num_features, self.num_features),
+        #     nn.ReLU(),
+        #     nn.Linear(self.num_features, self.num_features),
+        # )
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -784,10 +789,6 @@ class SwinTransformer(nn.Module):
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
 
-        # num = num.view(num.shape[0], num.shape[1], 1, 1)
-        # num = num.repeat(1, 1, 224, 224)
-        # x = torch.cat((x, num), dim=1)
-
         for layer in self.layers:
             x = layer(x)
 
@@ -801,23 +802,21 @@ class SwinTransformer(nn.Module):
         if len(aux) != 0:
             if aux["epoch"] >= self.fds_config1["start_smooth"]:
                 img = self.FDS1.smooth(img, aux["label"], aux["epoch"])
-        # num = self.num_layers(num)
-        # if len(aux) != 0:
-        #     if aux["epoch"] >= self.fds_config2["start_smooth"]:
-        #         num = self.FDS2.smooth(num, aux["label"], aux["epoch"])
+        num = self.num_layers(num)
+        if len(aux) != 0:
+            if aux["epoch"] >= self.fds_config2["start_smooth"]:
+                num = self.FDS2.smooth(num, aux["label"], aux["epoch"])
 
-        # fea = torch.cat((img, num), dim=1)
-        # fea = self.neck(fea)
+        fea = torch.cat((img, num), dim=1)
+        fea = self.neck(fea)
 
-        x = self.head1(img)
-        ind_hat = self.head2(img)
-
-        # ind_hat = torch.sigmoid(ind_hat)
+        x_hat = self.head1(img)
+        xi_hat = self.head2(img)
+        xi_hat = 1
 
         # self.indicator_weights = torch.nn.Parameter(self.indicator_weights)
-
         # x = torch.sum(torch.mul(self.indicator_weights, ind_hat), dim=-1)
-        return x, ind_hat
+        return x_hat, xi_hat, img
 
     def flops(self):
         flops = 0

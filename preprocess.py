@@ -10,7 +10,7 @@ import glob
 from Utils.base import parse_yaml
 
 
-args = parse_yaml("Config/swint.yaml")
+args = parse_yaml("swint.yaml")
 NORM_MIN = {
     "conflict_num": 0.0,
     "tmm_sum": 2550.8984375,
@@ -186,7 +186,7 @@ not_norm_list = [
 
 # [31:  223, 31:  223]
 # [15:  239,15:  239]
-def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin224"):
+def tf2pth(source_dir="Data/raw_data", target_dir="Data/origin192"):
 
     os.makedirs(target_dir, exist_ok=True)
     mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
@@ -201,7 +201,7 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin224"):
                 continue
 
             if key in args["D"]["img_keys"]:
-                res[key] = np.reshape(content[key], (255, 255))[15:239, 15:239]
+                res[key] = np.reshape(content[key], (255, 255))[31:223, 31:223]
                 res[key] = torch.from_numpy(res[key])
             if key in args["D"]["num_keys"]:
                 res[key] = content[key]
@@ -247,7 +247,7 @@ def tf2pth_origin(source_dir="Data/raw_data", target_dir="Data/origin224"):
 #                 continue
 
 #             if key in args["D"]["img_keys"]:
-#                 img_array.append(np.reshape(content[key], (255, 255))[15:239, 15:239])
+#                 img_array.append(np.reshape(content[key], (255, 255))[31:223, 31:223])
 #             if key in args["D"]["num_keys"]:
 #                 res[key] = content[key]
 #             if key in args["D"]["label_keys"]:
@@ -295,8 +295,8 @@ def tf2pth_reduce(source_dir="Data/raw_data", target_dir="Data/input_data2"):
             #     )
 
             #     pop = content["famale"] + content["male"]
-            #     res["sex"] = np.reshape(sex, (255, 255))[15:239, 15:239]
-            #     res["pop"] = np.reshape(pop, (255, 255))[15:239, 15:239]
+            #     res["sex"] = np.reshape(sex, (255, 255))[31:223, 31:223]
+            #     res["pop"] = np.reshape(pop, (255, 255))[31:223, 31:223]
 
             # if key in [
             #     "age_struct_child",
@@ -315,10 +315,10 @@ def tf2pth_reduce(source_dir="Data/raw_data", target_dir="Data/input_data2"):
             #     )
             #     age = specical_pop / total_pop
 
-            #     res["age"] = np.reshape(age, (255, 255))[15:239, 15:239]
+            #     res["age"] = np.reshape(age, (255, 255))[31:223, 31:223]
 
             if key in args["D"]["img_keys"]:
-                res[key] = np.reshape(content[key], (255, 255))[15:239, 15:239]
+                res[key] = np.reshape(content[key], (255, 255))[31:223, 31:223]
 
             if key in args["D"]["num_keys"]:
                 res[key] = content[key]
@@ -398,10 +398,12 @@ def get_info(source_dir="Data/origin"):
     df.to_csv("data.csv", index=None)
 
 
-def inspect_pth(pth_dir="Data/origin"):
+def inspect_pth(pth_dir="Data/origin224"):
     for file in os.listdir(pth_dir):
         f = torch.load(os.path.join(pth_dir, file))
         for key in f.keys():
+            if key == "poi_num":
+                print(f[key])
             if isinstance(f[key], (str, float)):
                 print(key, f[key])
             else:

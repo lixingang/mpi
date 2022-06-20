@@ -6,3 +6,5 @@
 /venv
 *.ipynb
 /Data
+.tmp
+/.vscode

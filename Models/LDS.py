@@ -10,8 +10,8 @@ def _get_lds_kernel_window(kernel, ks, sigma):
     assert kernel in ["gaussian", "tria ng", "laplace"]
     half_ks = (ks - 1) // 2
     if kernel == "gaussian":
-        # base_kernel = [0.0] * half_ks + [1.0] + [0.0] * half_ks
-        base_kernel = [0.1] * half_ks + [1.0] + [0.1] * half_ks
+        base_kernel = [0.0] * half_ks + [1.0] + [0.0] * half_ks
+        # base_kernel = [0.1] * half_ks + [1.0] + [0.1] * half_ks
         kernel_window = gaussian_filter1d(base_kernel, sigma=sigma) / max(
             gaussian_filter1d(base_kernel, sigma=sigma)
         )
@@ -31,14 +31,15 @@ def _get_lds_kernel_window(kernel, ks, sigma):
 
 def _get_bin_idx(x):
     # label = label.detach().cpu().numpy()
-    return min(int(x * np.float32(50)), 48)
+    return min(int(x * np.float32(100)), 90)
 
 
 def get_lds_weights(labels):
     # preds, labels: [Ns,], "Ns" is the number of total samples
     # assign each label to its corresponding bin (start from 0)
     # with your defined get_bin_idx(), return bin_index_per_label: [Ns,]
-    labels = torch.squeeze(labels)
+    if not isinstance(labels, list):
+        labels = torch.squeeze(labels)
     bin_index_per_label = [_get_bin_idx(label) for label in labels]
     # calculate empirical (original) label distribution: [Nb,]
     # "Nb" is the number of bins

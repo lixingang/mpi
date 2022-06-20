@@ -6,6 +6,13 @@ import yaml
 import re
 
 
+def asleast1d(arr):
+    if not isinstance(arr, np.ndarray):
+        arr = np.array(arr)
+    assert len(arr.shape) <= 2, "arr.shape>2"
+    return arr.reshape(len(max(arr.shape)), 1)
+
+
 """
 HOOK: 
 SaveOutput

@@ -29,6 +29,7 @@ import torch.multiprocessing as mp
 
 # import in-project packages
 from Losses.loss import *
+from Losses.tri_loss import calc_triplet_loss
 from Models import *
 from Models.LDS import get_lds_weights
 from Datasets.mpi_datasets import mpi_dataset
@@ -73,13 +74,13 @@ def get_model(args):
             in_chans=(len(args["D"]["img_keys"]), len(args["D"]["num_keys"])),
             num_classes=10,
             embed_dim=54,
-            depths=[2, 2, 6],
-            num_heads=[3, 6, 12],
+            depths=[2, 2, 6, 2],
+            num_heads=[3, 6, 12, 24],
             window_size=int(args["M"]["img_size"] / 32),
-            mlp_ratio=2.0,
+            mlp_ratio=4.0,
             drop_rate=0.0,
-            attn_drop_rate=0.0,
-            drop_path_rate=0.000,
+            attn_drop_rate=0.00,
+            drop_path_rate=0.0,
         ).cuda()
 
         model_parameter = summary(
@@ -109,21 +110,6 @@ def get_model(args):
         hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
         # hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
 
-    # if args["M"]["model"].lower() == "vit":
-    #     model = ViT(
-    #         num_patches=len(args["D"]["img_keys"]) + len(args["D"]["num_keys"]),
-    #         patch_dim=args["D"]["in_channel"],
-    #         num_classes=10,
-    #         dim=args["VIT"]["vit_dim"],
-    #         depth=args["VIT"]["vit_depth"],
-    #         heads=args["VIT"]["vit_heads"],
-    #         mlp_dim=args["VIT"]["vit_mlp_dim"],
-    #         dropout=args["VIT"]["vit_dropout"],
-    #         emb_dropout=args["VIT"]["vit_dropout"],
-    #     ).cuda()
-    #     print(model, file=open(os.path.join(args["M"]["log_dir"], "model.txt"), "a"))
-    #     hook1 = model.mlp_head[0].register_forward_hook(callback["last_fea"])
-    #     # hook2 = model.mlp_head[1].register_forward_hook(callback["weights_fea"])
     return model, callback
 
 
@@ -131,11 +117,17 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
 
     model.train()
     epoch = args["M"]["crt_epoch"]
-    meters = {"loss": Meter(), "y": Meter(), "yhat": Meter()}
+    meters = {
+        "loss": Meter(),
+        "y": Meter(),
+        "yhat": Meter(),
+        "loss1": Meter(),
+        "loss2": Meter(),
+        "tri_loss": Meter(),
+    }
     # criterion = BMCLoss(init_noise_sigma=0.1)
     # optimizer.add_param_group({"params": criterion.noise_sigma, "name": "noise_sigma"})
     for img, num, lbl, ind in loader:
-
         img = img.float().cuda()
         num = num.float().cuda()
         y = lbl["MPI3_fixed"].float().cuda()
@@ -143,29 +135,36 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
 
         # aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         # aux = {}
-        yhat, indhat = model(img, num)
-        loss1 = weighted_focal_mse_loss(y, yhat)
+        out = model(img, num)
+        yhat, indhat, feat = out[0], out[1], out[2]
+        loss1 = weighted_mse_loss(yhat, y)
         # loss1 = weighted_huber_loss(y, yhat,get_lds_weights(y))
         # loss1 = weighted_huber_loss(y, yhat, get_lds_weights(y), 1)
         # loss1 = weighted_huber_loss(yhat, y, get_lds_weights(y))
-        loss2 = weighted_focal_mse_loss(yhat, y)
+        loss2 = weighted_mse_loss(indhat, ind)
         # loss3 = weighted_huber_loss(ind, indhat)
         # print(loss1, loss3)
+        tri_loss = calc_triplet_loss(feat, y - 0, 0.8 - 0)
 
-        loss = loss1 + 0.01 * loss2
+        # loss = loss1 + 0.001 * loss2 + 0.001 * tri_loss
+        loss = loss1 + 0.001 * loss2
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
-        meters["loss"].update(loss)
+        meters["loss"].update(loss1)
+        # meters["loss2"].update(loss2)
+        # meters["tri_loss"].update(tri_loss)
         meters["y"].update(y)
         meters["yhat"].update(yhat)
 
         if args["GP"]["is_gp"]:
             gp_training_params = {
                 "feat": callback["last_fea"].data,
-                "year": lbl["year"],
                 "loc": np.stack([lbl["lat"], lbl["lon"]], -1),
+                "year": lbl["year"],
+                "poi": lbl["poi_num"],
+                "building": lbl["building_area"],
                 "y": y.cpu(),
             }
             gp.append_training_params(**gp_training_params)
@@ -174,13 +173,22 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     rmse = math.sqrt(
         mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
     )
-    acc = {"train/loss": meters["loss"].avg(), "train/r2": r2, "train/rmse": rmse}
+    acc = {
+        "train/loss": meters["loss"].avg(),
+        # "train/loss2": meters["loss2"].avg(),
+        # "train/tri_loss": meters["tri_loss"].avg(),
+        # "train/r2": r2,
+        # "train/rmse": rmse,
+    }
 
     logging.info(
         f"[train] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f}"
     )
 
-    # writer.add_scalar("Train/loss", acc["train/loss"], epoch)
+    writer.add_scalar("train/loss", acc["train/loss"], epoch)
+    # writer.add_scalar("train/loss2", acc["train/loss2"], epoch)
+    # writer.add_scalar("train/tri_loss", acc["train/tri_loss"], epoch)
+
     # writer.add_scalar("Train/r2", acc["train/r2"], epoch)
     # writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
 
@@ -192,7 +200,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
                 num = num.float().cuda()
                 y = lbl["MPI3_fixed"].float().cuda()
                 aux = {"epoch": epoch, "label": y}
-                yhat, _ = model(img, num, aux)
+                yhat, _, _ = model(img, num, aux)
                 meters["img_fea"].update(callback["img_fea"].data)
                 # meters["num_fea"].update(callback["num_fea"].data)
                 meters["y"].update(y)
@@ -200,10 +208,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         model.FDS1.update_running_stats(
             meters["img_fea"].cat(), meters["y"].cat(), epoch
         )
-        # model.FDS2.update_last_epoch_stats(epoch)
-        # model.FDS2.update_running_stats(
-        #     meters["num_fea"].cat(), meters["y"].cat(), epoch
-        # )
+
     return acc
 
 
@@ -219,12 +224,15 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             num = num.float().cuda()
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
-            yhat, indhat = model(img, num)
+            out = model(img, num)
+            yhat, indhat, feat = out[0], out[1], out[2]
             if gp:
                 gp.append_testing_params(
                     callback["last_fea"].data,
-                    lbl["year"],
                     np.stack([lbl["lat"], lbl["lon"]], -1),
+                    lbl["year"],
+                    lbl["poi_num"],
+                    lbl["building_area"],
                 )
             meters["y"].update(y)
             meters["yhat"].update(yhat)
@@ -253,8 +261,8 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
                 f"[gp-valid] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
             )
 
-        writer.add_scalar("Valid/r2", acc["valid/r2"], epoch)
-        writer.add_scalar("Valid/rmse", acc["valid/rmse"], epoch)
+        writer.add_scalar("valid/r2", acc["valid/r2"], epoch)
+        writer.add_scalar("valid/rmse", acc["valid/rmse"], epoch)
 
     return acc
 
@@ -265,7 +273,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
         epoch = args["M"]["crt_epoch"]
         model.load_state_dict(torch.load(args["M"]["best_weight_path"]))
         if gp:
-            gp.restore(args["M"]["best_gp_path"])
+            gp.restore(args["GP"]["best_gp_path"])
 
         meters = {
             "y": Meter(),
@@ -281,12 +289,15 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             num = num.float().cuda()
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
-            yhat, indhat = model(img, num)
+            out = model(img, num)
+            yhat, indhat, feat = out[0], out[1], out[2]
             if args["GP"]["is_gp"]:
                 gp.append_testing_params(
                     callback["last_fea"].data,
-                    lbl["year"],
                     np.stack([lbl["lat"], lbl["lon"]], -1),
+                    lbl["year"],
+                    lbl["poi_num"],
+                    lbl["building_area"],
                 )
             meters["y"].update(y)
             meters["yhat"].update(yhat)
@@ -296,23 +307,11 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             meters["ind"].update(ind)
             meters["indhat"].update(indhat)
 
-        np.savetxt(
-            os.path.join(args["M"]["log_dir"], "weight_features.csv"),
-            meters["indhat"].cat().cpu().detach().numpy(),
-            delimiter=",",
-            fmt="%.3f",
-        )
-        np.savetxt(
-            os.path.join(args["M"]["log_dir"], "weight_indicator.csv"),
-            meters["ind"].cat().cpu().detach().numpy(),
-            delimiter=",",
-            fmt="%.3f",
-        )
-
         r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         rmse = math.sqrt(
             mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         )
+
         acc = {"test/r2": r2, "test/rmse": rmse}
 
         logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
@@ -331,8 +330,8 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
                 f"[gp-test] epoch {epoch}/{args['M']['epochs']} r2={r2:.3f} rmse={rmse:.4f} "
             )
 
-        writer.add_scalar("Test/r2", acc["test/r2"], epoch)
-        writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
+        writer.add_scalar("test/r2", acc["test/r2"], epoch)
+        writer.add_scalar("test/rmse", acc["test/rmse"], epoch)
         # writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
         # writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
 
@@ -346,14 +345,31 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             }
         )
         df.to_csv(os.path.join(args["M"]["log_dir"], "predict.csv"))
-
+        indicator_columns = [
+            "Child mortality",
+            "Nutrition",
+            "School attendance",
+            "Years of schooling",
+            "Electricity",
+            "Drinking water",
+            "Sanitation",
+            "Housing",
+            "Cooking fuel",
+            "Assets",
+        ]
+        # df1 = pd.DataFrame(
+        #     meters["indhat"].cat().cpu().detach().numpy(), columns=indicator_columns
+        # )
+        # df2 = pd.DataFrame(
+        #     meters["ind"].cat().cpu().detach().numpy(), columns=indicator_columns
+        # )
+        # df1.to_csv(os.path.join(args["M"]["log_dir"], "ind_hat.csv"))
+        # df2.to_csv(os.path.join(args["M"]["log_dir"], "ind.csv"))
         return acc
 
 
 def pipline(args, train_list, valid_list, test_list):
 
-    if os.path.exists(args["M"]["log_dir"]):
-        shutil.rmtree(args["M"]["log_dir"])
     logging_setting(args["M"]["log_dir"])
     writer = SummaryWriter(log_dir=args["M"]["log_dir"])
 
@@ -362,18 +378,24 @@ def pipline(args, train_list, valid_list, test_list):
     )
 
     # 4.定义 data loader
+    LABELS = [label["MPI3_fixed"] for _, _, label, _ in mpi_dataset(args, train_list)]
+    WEIGHTS = get_lds_weights(LABELS)
+
     train_loader = DataLoader(
         mpi_dataset(args, train_list),
         batch_size=args["M"]["batch_size"],
         shuffle=True,
         num_workers=3,
+        # sampler=torch.utils.data.WeightedRandomSampler(
+        #     weights=WEIGHTS, num_samples=len(WEIGHTS), replacement=True
+        # ),
         pin_memory=True,
     )
     valid_loader = DataLoader(
         mpi_dataset(args, valid_list),
         batch_size=args["M"]["batch_size"],
         shuffle=True,
-        num_workers=3,
+        num_workers=1,
         pin_memory=True,
     )
     test_loader = DataLoader(
@@ -387,6 +409,7 @@ def pipline(args, train_list, valid_list, test_list):
 
     if args["M"]["restore_weight"] is not None:
         train_model.load_state_dict(torch.load(args["M"]["restore_weight"]))
+        print("weight loaded")
 
     # 6.初始化定义优化器、Scheduler
     optimizer = torch.optim.Adam(
@@ -405,8 +428,18 @@ def pipline(args, train_list, valid_list, test_list):
         args["M"]["crt_epoch"] = epoch
 
         if args["GP"]["is_gp"]:
-            gp = gp_model(sigma=1, r_loc=2.5, r_year=3, sigma_e=0.32, sigma_b=0.01)
+            gp = gp_model(
+                sigma=args["GP"]["sigma"],
+                r_loc=args["GP"]["r_loc"],
+                r_year=args["GP"]["r_year"],
+                r_poi=args["GP"]["r_poi"],
+                r_building=args["GP"]["r_building"],
+                sigma_e=args["GP"]["sigma_e"],
+                sigma_b=args["GP"]["sigma_b"],
+            )
             gp.clear_params()
+        # if args["GP"]["best_gp_path"]:
+        #     gp.restore(args["GP"]["best_gp_path"])
 
         # training
         if epoch % 1 == 0:
@@ -415,34 +448,33 @@ def pipline(args, train_list, valid_list, test_list):
             )
 
         # validation
-        if epoch % 10 == 0:
+        if epoch % 5 == 0:
             valid_acc = valid_epoch(
                 args, train_model, callback, valid_loader, writer, gp
             )
-            if valid_acc["valid/rmse"] < args["M"]["best_acc"]:
-                args["M"]["best_acc"] = valid_acc["valid/rmse"]
+            if valid_acc["valid/r2"] > args["M"]["best_acc"]:
+                args["M"]["best_acc"] = valid_acc["valid/r2"]
                 args["M"]["best_weight_path"] = os.path.join(
-                    args["M"]["log_dir"],
-                    "best_rmse.pth"
-                    # f"ep{epoch}.pth"
+                    args["M"]["log_dir"], "best_r2.pth"
                 )
                 torch.save(train_model.state_dict(), args["M"]["best_weight_path"])
                 if args["GP"]["is_gp"]:
-                    args["M"]["best_gp_path"] = args["M"]["best_weight_path"].replace(
-                        "rmse", "gp"
+                    args["GP"]["best_gp_path"] = os.path.join(
+                        args["M"]["log_dir"], "best_gp.pth"
                     )
-                    gp.save(args["M"]["best_gp_path"])
+                    gp.save(args["GP"]["best_gp_path"])
 
                 early_stop = 0
                 # if best validation model, then testing
-                test_model, test_callback = get_model(args)
-                _ = test_epoch(args, test_model, test_callback, test_loader, writer, gp)
 
             else:
                 early_stop += 1
                 logging.info(
                     f"Early Stop Counter {early_stop} of {args['M']['max_early_stop']}."
                 )
+
+            test_model, test_callback = get_model(args)
+            _ = test_epoch(args, test_model, test_callback, test_loader, writer, gp)
 
             if early_stop >= args["M"]["max_early_stop"]:
                 break
@@ -467,7 +499,7 @@ def pipline(args, train_list, valid_list, test_list):
     return "OK"
 
 
-def get_list(cfg_path="origin.yaml", tag="lds"):
+def prepare_fold(cfg_path="origin.yaml", tag="lds"):
 
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
@@ -479,11 +511,14 @@ def get_list(cfg_path="origin.yaml", tag="lds"):
 
     if os.path.exists(log_dir):
         message = input(
-            "[INFO] found duplicate directories, whether to overwrite (Y/N) "
+            "[INFO] found duplicate directories, whether to overwrite (Y/N/R) "
         )
         if message.lower() == "y":
             print("[INFO] deleting the existing logs...")
             shutil.rmtree(log_dir)
+        elif message.lower() == "r":
+            print("[INFO] restoring the existing logs...")
+            return "restore"
         else:
             print("[INFO] canceled")
             sys.exit(0)
@@ -499,23 +534,25 @@ def get_list(cfg_path="origin.yaml", tag="lds"):
     value_list = value_list[sorted_id]
     # kf = KFold(n_splits=5, shuffle=True, random_state=args["M"]["seed"])
 
-    fold = []
+    fold = {"name": [], "value": []}
     k = args["M"]["k"]
     for i in range(k):
-        fold.append([v for v in range(0 + i, len(data_list), k)])
-
+        fold["name"].append([v for v in range(0 + i, len(data_list), k)])
+        fold["value"].append([v for v in range(0 + i, len(value_list), k)])
     # for i, (train_part, test_index) in enumerate(kf.split(data_list)):
     #     train_index, valid_index = split_train_valid(train_part, [0.8, 0.2])
     for i in range(k):
-        test_part = fold[i]
-        train_part = []
+        test_part = fold["name"][i]
+        train_part = {"name": [], "value": []}
         for j in range(k):
             if j == i:
                 continue
             else:
-                train_part = train_part + fold[j]
-
-        train_index, valid_index = split_train_valid(np.array(train_part), [0.75, 0.25])
+                train_part["name"] = train_part["name"] + fold["name"][j]
+                train_part["value"] = train_part["value"] + fold["value"][j]
+        train_index, valid_index = split_train_valid(
+            np.array(train_part["name"]), [0.75, 0.25]
+        )
         test_index = np.array(test_part)
 
         yamlname = (
@@ -548,16 +585,63 @@ def get_list(cfg_path="origin.yaml", tag="lds"):
     return log_dir
 
 
+def run_restore(source_log_dir="Logs/swint_test"):
+    processes = []
+    for index in [1, 2, 3, 5]:
+
+        # select gpu
+        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
+        memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
+        while max(memory_gpu) < 5500:
+            time.sleep(20)
+            print("[INFO] Query the idle GPU ...")
+            os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
+            memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
+
+        print(f"[INFO] start the pipline: {str(index)}.yaml")
+        print(f"[INFO] GPU:{np.argmax(memory_gpu)} was selected")
+        best_gpu = int(np.argmax(memory_gpu))
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
+
+        if not os.path.isdir(os.path.join(source_log_dir, str(index))):
+            continue
+        args = parse_yaml(os.path.join(source_log_dir, str(index), "config.yaml"))
+        setup_seed(args["M"]["seed"])
+
+        print(f"[INFO] loading C-V record: {str(index)}.yaml")
+        data = parse_yaml(os.path.join(source_log_dir, str(index) + ".yaml"))
+        train_list = data["train_list"]
+        valid_list = data["valid_list"]
+        test_list = data["test_list"]
+        train_list = [os.path.join(args["D"]["data_dir"], i) for i in train_list]
+        valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
+        test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
+
+        # pipline(
+        #     args,
+        #     train_list,
+        #     valid_list,
+        #     test_list,
+        # )
+
+        p = mp.Process(target=pipline, args=(args, train_list, valid_list, test_list))
+        p.start()
+        processes.append(p)
+        time.sleep(10)
+    for p in processes:
+        p.join()
+
+
 def run_1_fold(cfg_path="origin.yaml", tag="base", index=1):
     # select gpu
-    print("[INFO] Query the idle GPU ...")
-    os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
-    memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+    #  Query the idle GPU ... , generate .tmp file in current folder
+    os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
+    memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
     while max(memory_gpu) < 5500:
         time.sleep(20)
         print("[INFO] Query the idle GPU ...")
-        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
-        memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
+        memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
 
     print(f"[INFO] start the pipline: {index}.yaml")
     print(f"[INFO] GPU:{np.argmax(memory_gpu)} was selected")
@@ -565,11 +649,11 @@ def run_1_fold(cfg_path="origin.yaml", tag="base", index=1):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(best_gpu)
 
     # start pipline
-    log_dir = get_list(cfg_path, tag)
+    log_dir = prepare_fold(cfg_path, tag)
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
 
-    assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
+    assert os.path.exists(log_dir), "目录不存在, 请先运行prepare_fold命令."
     args["M"]["log_dir"] = os.path.join(log_dir, str(index))
     print(f"[INFO] loading C-V record: {index}.yaml")
     data = parse_yaml(os.path.join(log_dir, str(index) + ".yaml"))
@@ -580,15 +664,20 @@ def run_1_fold(cfg_path="origin.yaml", tag="base", index=1):
     valid_list = [os.path.join(args["D"]["data_dir"], i) for i in valid_list]
     test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
     print(f"[INFO] start the pipline: {index}.yaml")
-    pipline(args, train_list, valid_list, test_list)
+    pipline(
+        args,
+        train_list,
+        valid_list,
+        test_list,
+    )
 
 
 def run_all(cfg_path="Config/swint.yaml", tag="base", indexs=None):
-    log_dir = get_list(cfg_path, tag)
+    log_dir = prepare_fold(cfg_path, tag)
     args = parse_yaml(cfg_path)
     setup_seed(args["M"]["seed"])
 
-    assert os.path.exists(log_dir), "目录不存在, 请先运行get_list命令."
+    assert os.path.exists(log_dir), "目录不存在, 请先运行prepare_fold命令."
 
     processes = []
     if indexs == None:
@@ -608,13 +697,13 @@ def run_all(cfg_path="Config/swint.yaml", tag="base", indexs=None):
 
         # pipline(args, train_list, valid_list, test_list)
         print("[INFO] Query the idle GPU ...")
-        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
-        memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+        os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
+        memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
         while max(memory_gpu) < 5500:
             time.sleep(20)
             print("[INFO] Query the idle GPU ...")
-            os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp")
-            memory_gpu = [int(x.split()[2]) for x in open("tmp", "r").readlines()]
+            os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
+            memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
 
         print(f"[INFO] start the pipline: {index}.yaml")
         print(f"[INFO] GPU:{np.argmax(memory_gpu)} was selected")

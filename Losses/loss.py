@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.nn.modules.loss import _Loss
+from Utils.base import *
 
 
 class BMCLoss(_Loss):
@@ -174,6 +175,7 @@ import torch.nn.functional as F
 def weighted_mse_loss(inputs, targets, weights=None):
     loss = (inputs - targets) ** 2
     if weights is not None:
+        loss.squeeze_()
         loss *= weights.expand_as(loss)
     loss = torch.mean(loss)
     return loss
@@ -190,6 +192,7 @@ def weighted_l1_loss(inputs, targets, weights=None):
 def weighted_focal_mse_loss(
     inputs, targets, weights=None, activate="sigmoid", beta=0.2, gamma=1
 ):
+
     loss = (inputs - targets) ** 2
     loss *= (
         (torch.tanh(beta * torch.abs(inputs - targets))) ** gamma
@@ -197,6 +200,7 @@ def weighted_focal_mse_loss(
         else (2 * torch.sigmoid(beta * torch.abs(inputs - targets)) - 1) ** gamma
     )
     if weights is not None:
+        loss.squeeze_()
         loss *= weights.expand_as(loss)
     loss = torch.mean(loss)
     return loss
