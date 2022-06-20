@@ -5,25 +5,30 @@ import os
 import sys
 import glob, time
 import pandas as pd
+import albumentations as A
 
 sys.path.append("/home/lxg/data/mpi/")
 from Utils.base import parse_yaml
 
 
 class mpi_dataset:
-    def __init__(self, args, datalist):
+    def __init__(self, args, datalist, transform=None):
         """
         h5f: the h5 object
         """
         self.datalist = datalist
-        self.img_keys = args["D"]["img_keys"]
-        self.num_keys = args["D"]["num_keys"]
-        self.label_keys = args["D"]["label_keys"]
-        self.indicator_keys = args["D"]["indicator_keys"]
+        self.img_keys = args.D.img_keys
+        self.num_keys = args.D.num_keys
+        self.label_keys = args.D.label_keys
+        self.indicator_keys = args.D.indicator_keys
+        self.transform = transform
 
     def __getitem__(self, i):
         data = torch.load(self.datalist[i])
         img = np.stack([data[k] for k in self.img_keys], 0)
+        if self.transform:
+            transformed = self.transform(image=img)
+            img = transformed["image"]
         # img = np.transpose(img, (2, 0, 1))
         # img = data["img"]
         num = np.stack([data[k] for k in self.num_keys], 0)

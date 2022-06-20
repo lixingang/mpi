@@ -31,7 +31,7 @@ def _get_lds_kernel_window(kernel, ks, sigma):
 
 def _get_bin_idx(x):
     # label = label.detach().cpu().numpy()
-    return min(int(x * np.float32(100)), 90)
+    return min(int(x * np.float32(100)), 80)
 
 
 def get_lds_weights(labels):
@@ -49,7 +49,7 @@ def get_lds_weights(labels):
     emp_label_dist = [num_samples_of_bins.get(i, 0) for i in range(Nb)]
 
     # lds_kernel_window: [ks,], here for example, we use gaussian, ks=5, sigma=2
-    lds_kernel_window = _get_lds_kernel_window(kernel="gaussian", ks=5, sigma=2)
+    lds_kernel_window = _get_lds_kernel_window(kernel="gaussian", ks=9, sigma=2)
     # calculate effective label distribution: [Nb,]
     eff_label_dist = convolve1d(
         np.array(emp_label_dist), weights=lds_kernel_window, mode="constant"

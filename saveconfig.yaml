@@ -1,0 +1,86 @@
+D:
+  data_dir: Data/NORM224
+  img_keys:
+  - BLUE
+  - GREEN
+  - NIR
+  - RED
+  - SWIR1
+  - SWIR2
+  - TEMP1
+  - age_struct_child
+  - age_struct_young
+  - age_struct_middle
+  - age_struct_old
+  - elevation
+  - famale
+  - male
+  - pr
+  - tmmn
+  - tmmx
+  - NIGHTLIGHTS
+  - viirs_v2
+  indicator_keys:
+  - Child mortality
+  - Nutrition
+  - School attendance
+  - Years of schooling
+  - Electricity
+  - Drinking water
+  - Sanitation
+  - Housing
+  - Cooking fuel
+  - Assets
+  label_keys:
+  - MPI3_fixed
+  - lat
+  - lon
+  - poi_num
+  - building_area
+  - year
+  num_keys:
+  - Households_num
+  - road_length
+  - death_num
+  - building_area
+  - burnedCount
+  - conflict_num
+  - place_num
+  - poi_num
+  - water
+  - year
+  source: Data/nga_mpi.csv
+FDS:
+  is_fds: 1
+GP:
+  best_gp_path: null
+  is_gp: 1
+  r_building: 0.01
+  r_loc: 2.5
+  r_poi: 40
+  r_year: 10
+  sigma: 2
+  sigma_b: 0.01
+  sigma_e: 0.32
+M:
+  batch_size: 36
+  best_acc: -99
+  best_weight_path: null
+  crt_epoch: 1
+  device: 0
+  epochs: 2000
+  img_size: 224
+  init_lr: 0.0001
+  log_dir: Logs
+  losses:
+    loss: 1.0
+  max_early_stop: 30
+  model: swint
+  prepare_folder: cv
+  restore_weight: null
+  scheduler:
+    gamma: 0.1
+    milestones:
+    - 50
+    - 100
+  seed: 2022

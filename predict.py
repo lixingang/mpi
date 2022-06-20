@@ -14,6 +14,7 @@ import glob
 import time
 import random
 import datetime
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
@@ -27,7 +28,7 @@ from torch.utils.tensorboard import SummaryWriter
 from Losses.loss import HEMLoss, CenterLoss
 from Models import *
 from Datasets.mpi_datasets import mpi_dataset
-from main import get_model
+from main import prepare_model
 from Utils.base import parse_yaml, parse_log
 
 
@@ -39,6 +40,31 @@ def logging_setting():
         datefmt="%Y%m%d %H:%M:%S",
         level=logging.INFO,
     )
+
+
+def get_hist(y, min_value=0.0, maxs_value=0.9, step=0.01):
+    sorted_id = sorted(range(len(y)), key=lambda k: y[k])
+    y = np.array([y[i] for i in sorted_id])
+    hist_index = {}
+    iter_list = np.arange(min_value, maxs_value, step)
+    for i in iter_list:
+        start = i
+        end = i + step
+        hist_index[round(end, 2)] = np.where((y > start) & (y <= end))[0]
+    return hist_index, iter_list
+
+
+def chart_1_fold_result(df, cv_index, writer):
+    y = df["y"]
+    yhat = df["yhat"]
+    f = plt.figure(dpi=150, figsize=(6, 5))
+    ax = f.add_subplot(1, 1, 1)
+    ax.scatter(y, yhat)
+    ax.set_xlabel("y")
+    ax.set_ylabel("yhat")
+    ax.set_xlim([0, 0.8])
+    ax.set_ylim([0, 0.8])
+    writer.add_figure(f"{cv_index}/chart_1_fold_result", f)
 
 
 def count_analysis(df, cv_index, writer):
@@ -73,7 +99,7 @@ def count_analysis(df, cv_index, writer):
     # axs[1, 1].set_xlabel("y_hat")
     # axs[1,1].set_xlim([-0.8, 0.8])
     plt.tight_layout()
-    writer.add_figure(f"{cv_index}_count_analysis", f)
+    writer.add_figure(f"{cv_index}/count_analysis", f)
 
     indexs = list(range(len(hist_count)))
     nonzero_index = [i for i in indexs if hist_count[i] > 0]
@@ -95,7 +121,7 @@ def feature_statistics(df, cv_index, writer):
     y = np.array(df["y"])
     # img_fea = np.array(df["img_fea"])
     # num_fea = np.array(df["num_fea"])
-    all_fea = np.array(df["last_fea"])
+    all_fea = np.array(df["gp_feat"])
     hist_index, iter_list = get_hist(y, 0.0, 0.9, 0.02)
 
     hist_fea = {"Mean": [], "Variance": []}
@@ -128,23 +154,12 @@ def feature_statistics(df, cv_index, writer):
         ax.bar(iter_list, hist_cosine[key], width=0.01)
         ax.set_ylabel(f"{key} cosine similarity")
         ax.set_xlabel("Target value")
-        writer.add_figure(f"{cv_index}_{key}_feature_statistics", f)
-
-
-def get_hist(y, min_value=0.0, maxs_value=0.9, step=0.01):
-    sorted_id = sorted(range(len(y)), key=lambda k: y[k])
-    y = np.array([y[i] for i in sorted_id])
-    hist_index = {}
-    iter_list = np.arange(min_value, maxs_value, step)
-    for i in iter_list:
-        start = i
-        end = i + step
-        hist_index[round(end, 2)] = np.where((y > start) & (y <= end))[0]
-    return hist_index, iter_list
+        writer.add_figure(f"{cv_index}/{key}_feature_statistics", f)
 
 
 def pipline(log_dir="Logs/swint224_loss1"):
     logging_setting()
+    os.system(f"rm {log_dir}/events*")
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     writer = SummaryWriter(log_dir=log_dir)
     # read config
@@ -157,16 +172,17 @@ def pipline(log_dir="Logs/swint224_loss1"):
         "ind": Meter(),
         "indhat": Meter(),
         "img_fea": Meter(),
-        "last_fea": Meter(),
+        "num_fea": Meter(),
+        "gp_feat": Meter(),
     }
     for fold in glob.glob(f"{log_dir}/*/"):
         cv_index = os.path.basename(os.path.dirname(fold))
         args = parse_yaml(os.path.join(fold, "config.yaml"))
-        setup_seed(args["M"]["seed"])
+        setup_seed(args.M.seed)
         data_list = parse_yaml(os.path.join(f"{log_dir}/{cv_index}.yaml"))
         test_list = data_list["test_list"]
         test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
-        model, callback = get_model(args)
+        model, callback = prepare_model(args)
         loader = DataLoader(
             mpi_dataset(args, test_list),
             batch_size=1,
@@ -175,34 +191,25 @@ def pipline(log_dir="Logs/swint224_loss1"):
         )
         with torch.no_grad():
             model.eval()
-            epoch = args["M"]["crt_epoch"]
+            epoch = args.M.crt_epoch
             model.load_state_dict(torch.load(args["M"]["best_weight_path"]))
             if args["GP"]["is_gp"]:
                 gp = gp_model(sigma=1, r_loc=2.5, r_year=10, sigma_e=0.32, sigma_b=0.01)
                 gp.restore(args["GP"]["best_gp_path"])
 
-            # meters = {
-            #     "y": Meter(),
-            #     "yhat": Meter(),
-            #     "name": Meter(),
-            #     "lon": Meter(),
-            #     "lat": Meter(),
-            #     "ind": Meter(),
-            #     "indhat": Meter(),
-            #     "img_fea": Meter(),
-            #     "last_fea": Meter(),
-            # }
-            for img, _, lbl, ind in loader:
+            for img, num, lbl, ind in loader:
                 img = img.float().cuda()
+                num = num.float().cuda()
                 y = lbl["MPI3_fixed"].float().cuda()
                 ind = ind.float().cuda()
-                yhat, indhat, _ = model(img, 999)
+                yhat, indhat, _ = model(img, num)
                 if args["GP"]["is_gp"]:
                     gp.append_testing_params(
-                        callback["last_fea"].data,
+                        callback["gp_feat"].data,
+                        np.stack([lbl["lat"], lbl["lon"]], -1),
                         lbl["year"].item(),
                         lbl["poi_num"].item(),
-                        np.stack([lbl["lat"], lbl["lon"]], -1),
+                        lbl["poi_num"].item(),
                     )
                 meters["y"].update(y)
                 meters["yhat"].update(yhat)
@@ -212,12 +219,13 @@ def pipline(log_dir="Logs/swint224_loss1"):
                 meters["ind"].update(ind)
                 meters["indhat"].update(indhat)
                 meters["img_fea"].update(callback["img_fea"].data)
-                meters["last_fea"].update(callback["last_fea"].data)
+                meters["num_fea"].update(callback["num_fea"].data)
+                meters["gp_feat"].update(callback["gp_feat"].data)
 
             if args["GP"]["is_gp"]:
                 ygp = gp.gp_run(
-                    model.state_dict()["head1.1.weight"].cpu(),
-                    model.state_dict()["head1.1.bias"].cpu(),
+                    model.state_dict()["head1.0.weight"].cpu(),
+                    model.state_dict()["head1.0.bias"].cpu(),
                 )
 
             # r2 = r2_score(ygp, meters["y"].cat()).numpy().item()
@@ -238,35 +246,15 @@ def pipline(log_dir="Logs/swint224_loss1"):
         "lon": meters["lon"].cat(),
         "lat": meters["lat"].cat(),
         "img_fea": meters["img_fea"].cat(),
-        # "num_fea": meters["num_fea"].cat(),
-        "last_fea": meters["last_fea"].cat(),
+        "num_fea": meters["num_fea"].cat(),
+        "gp_feat": meters["gp_feat"].cat(),
     }
 
     count_analysis(df, cv_index, writer)
     feature_statistics(df, cv_index, writer)
+    chart_1_fold_result(df, cv_index, writer)
 
     writer.close()
-
-
-def get_logs(logname):
-    items = {"name": [], "seed": [], "r2": [], "rmse": [], "mape": []}
-    log_list = glob.glob(f"Logs/{logname}/*/")
-    for log in log_list:
-        cfg = parse_yaml(os.path.join(log, "config.yaml"))
-        r2, rmse, mape = parse_log(os.path.join(log, "run.log"))
-        items["name"].append(log)
-        items["seed"].append(cfg["M"]["seed"])
-        items["r2"].append(r2)
-        items["rmse"].append(rmse)
-        items["mape"].append(mape)
-    items["name"].append("Average")
-    items["seed"].append("-1")
-    items["r2"].append(np.average([float(i) for i in items["r2"]]))
-    items["rmse"].append(np.average([float(i) for i in items["rmse"]]))
-    items["mape"].append(np.average([float(i) for i in items["mape"]]))
-    # print(items)
-    df = pd.DataFrame(items, index=None)
-    df.to_csv(f"Logs/{logname}/STAT_{logname}.csv", index=False)
 
 
 def plot_ind(logname="swint_config_base", mode="separate"):
@@ -332,4 +320,4 @@ def plot_ind(logname="swint_config_base", mode="separate"):
 
 if __name__ == "__main__":
 
-    fire.Fire()
+    fire.Fire(pipline)

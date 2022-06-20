@@ -4,6 +4,8 @@ import random
 import time
 import yaml
 import re
+from collections import namedtuple
+import munch
 
 
 def asleast1d(arr):
@@ -44,7 +46,7 @@ def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
 
 
 def randnorepeat(m, n):
@@ -53,17 +55,17 @@ def randnorepeat(m, n):
     return d
 
 
-def split_train_test(data_list, ratio=[0.6, 0.2, 0.2]):
-    idx = list(range(len(data_list)))
-    assert len(ratio) >= 2 and len(ratio) <= 3, "请确认ratio>=2 and <=3"
-    assert np.sum(np.array(ratio)) == 1.0, "请确认ratio总和为1"
-    random.shuffle(idx)
-    slice1 = int(len(idx) * ratio[0])
-    slice2 = int(len(idx) * (ratio[1] + ratio[0]))
-    if len(ratio) == 2:
-        return data_list[:slice1], data_list[slice1:slice2]
-    else:
-        return data_list[:slice1], data_list[slice1:slice2], data_list[slice2:]
+# def split_train_test(data_list, ratio=[0.6, 0.2, 0.2]):
+#     idx = list(range(len(data_list)))
+#     assert len(ratio) >= 2 and len(ratio) <= 3, "请确认ratio>=2 and <=3"
+#     assert np.sum(np.array(ratio)) == 1.0, "请确认ratio总和为1"
+#     random.shuffle(idx)
+#     slice1 = int(len(idx) * ratio[0])
+#     slice2 = int(len(idx) * (ratio[1] + ratio[0]))
+#     if len(ratio) == 2:
+#         return data_list[:slice1], data_list[slice1:slice2]
+#     else:
+#         return data_list[:slice1], data_list[slice1:slice2], data_list[slice2:]
 
 
 def split_train_valid(data_list, ratio=[0.6, 0.4]):
@@ -120,24 +122,35 @@ parse_log
 """
 
 
+# def dict2namedtuple(obj):
+#     if isinstance(obj, dict):
+#         for key, value in obj.items():
+#             obj[key] = dict2namedtuple(value)
+#         return namedtuple("GenericDict", obj.keys())(**obj)
+#     elif isinstance(obj, list):
+#         return [dict2namedtuple(item) for item in obj]
+#     else:
+#         return obj
+
+
 def parse_yaml(path):
-    config = None
+    # config = None
+    # with open(path, "r") as f:
+    #     config = yaml.load(f, Loader=yaml.FullLoader)
+    # cfg = bunch.Bunch().fromDict(config)
     with open(path, "r") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+        config = munch.Munch.fromYAML(f, Loader=yaml.FullLoader)
     return config
 
 
-def parse_log(path):
+def save_yaml(obj, path):
+    with open(path, "w") as f:
+        yaml.safe_dump(obj, f)
+    return 1
 
-    f = open(path, "r")
-    lines = f.readlines()
-    line = lines[-1].strip()
-    pattern = re.compile(r"(?<=r2.)\d+\.?\d*")
-    r2 = pattern.findall(line)[0]
-    pattern = re.compile(r"(?<=mse.)\d+\.?\d*")
-    rmse = pattern.findall(line)[0]
-    # pattern = re.compile(r'(?<=mape.)\d+\.?\d*')
-    # mape = pattern.findall(line)[0]
-    mape = 0
-    f.close()
-    return float(r2), float(rmse), float(mape)
+
+if __name__ == "__main__":
+    args = parse_yaml("/home/lxg/mpi/swint.yaml")
+    # print(args)
+    print(args.M.model)
+    save_yaml(args, "saveconfig.yaml")

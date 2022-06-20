@@ -71,7 +71,6 @@ class GaussianProcess:
         # H_test = np.concatenate((feat_test, np.ones((feat_test.shape[0], 1))), axis=1)
         feat_train = torch.from_numpy(feat_train).cuda()
         feat_test = torch.from_numpy(feat_test).cuda()
-
         H_train = torch.cat(
             (feat_train, torch.ones((feat_train.shape[0], 1)).cuda()), dim=1
         )
@@ -129,6 +128,7 @@ class GaussianProcess:
 
         b = torch.cat((model_weights.transpose(1, 0), model_bias)).cuda()
         K_inv = torch.linalg.inv(kernel[0:n_train, 0:n_train]).to(torch.float32).cuda()
+
         # The definition of beta comes from equation 2.41 in Rasmussen (2006)
         beta = torch.linalg.inv(B_inv + H_train.T.mm(K_inv).mm(H_train)).mm(
             H_train.T.mm(K_inv).mm(Y_train) + B_inv.mm(b)
