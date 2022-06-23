@@ -33,6 +33,7 @@ from Models import *
 from Models.LDS import get_lds_weights
 from Datasets.mpi_datasets import mpi_dataset
 from Utils.base import parse_yaml, setup_seed, Meter, SaveOutput, split_train_valid
+from Utils.predict_utils import *
 
 
 def logging_setting(log_dir):
@@ -234,11 +235,11 @@ def prepare_model(args):
     return model, callback
 
 
-def prepare_gpu():
+def prepare_gpu(m_size=5200):
     os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
     memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
-    while max(memory_gpu) < 5500:
-        time.sleep(20)
+    while max(memory_gpu) < m_size:
+        time.sleep(30)
         print("[INFO] Query the idle GPU ...")
         os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >.tmp")
         memory_gpu = [int(x.split()[2]) for x in open(".tmp", "r").readlines()]
@@ -265,7 +266,6 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         num = num.float().cuda()
         y = lbl["MPI3_fixed"].float().cuda()
         ind = ind.float().cuda()
-        # aux = {"epoch": epoch, "label": y} if args["FDS"]["is_fds"] else {}
         out = model(img, num)
         yhat, indhat, feat = out[0], out[1], out[2]
 
@@ -469,6 +469,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             }
         )
         df.to_csv(os.path.join(args.M.current_log_dir, "predict.csv"))
+        torch.save(model, os.path.join(args.M.current_log_dir, "final_model.pt"))
         # indicator_columns = [
         #     "Child mortality",
         #     "Nutrition",
@@ -623,62 +624,28 @@ def pipline(args, train_list, valid_list, test_list):
     return "OK"
 
 
-# def run_restore(source_log_dir="Logs/swint_test"):
-#     processes = []
-#     for index in [1]:
-
-#         os.environ["CUDA_VISIBLE_DEVICES"] = prepare_gpu()
-
-#         if not os.path.isdir(os.path.join(source_log_dir, str(index))):
-#             continue
-#         args = parse_yaml(os.path.join(source_log_dir, str(index), "config.yaml"))
-#         setup_seed(args.M.seed)
-#         print(f"[INFO] loading C-V record: {str(index)}.yaml")
-#         data = parse_yaml(os.path.join(source_log_dir, str(index) + ".yaml"))
-#         train_list = data.train_list
-#         valid_list = data.valid_list
-#         test_list = data.test_list
-#         train_list = [os.path.join(args.D.data_dir, i) for i in train_list]
-#         valid_list = [os.path.join(args.D.data_dir, i) for i in valid_list]
-#         test_list = [os.path.join(args.D.data_dir, i) for i in test_list]
-
-#         # pipline(
-#         #     args,
-#         #     train_list,
-#         #     valid_list,
-#         #     test_list,
-#         # )
-
-#         p = mp.Process(target=pipline, args=(args, train_list, valid_list, test_list))
-#         p.start()
-#         processes.append(p)
-#         time.sleep(10)
-#     for p in processes:
-#         p.join()
-
-
-def run(cfg_path="Config/swint.yaml", tag="base", indexs=None, restore=False):
+def train(cfg_path="Config/swint.yaml", tag="base", index=None, restore=False):
     args = parse_yaml(cfg_path)
     args.M.parent_log_dir = os.path.join(args.M.root_log_dir, tag)
     setup_seed(args.M.seed)
     prepare_datalist(args)
     processes = []
-    if args.M.split_method == "cv" and indexs == None:
+    if args.M.split_method == "cv" and index == None:
         run_indexs = range(1, args.M.k_fold + 1)
+    elif args.M.split_method == "cv" and index != None:
+        run_indexs = [index]
     elif args.M.split_method == "holdout":
         run_indexs = [1]
     else:
         raise NotImplementedError
-    for index in run_indexs:
+    for i in run_indexs:
         # args.M.current_log_dir = os.path.join(args.M.current_log_dir, tag, str(index))
-        print(f"[INFO] loading C-V record {index}.yaml")
-
-        data = parse_yaml(os.path.join(args.M.parent_log_dir, str(index) + ".yaml"))
+        data = parse_yaml(os.path.join(args.M.parent_log_dir, str(i) + ".yaml"))
         train_list = [os.path.join(args.D.data_dir, i) for i in data.train_list]
         valid_list = [os.path.join(args.D.data_dir, i) for i in data.valid_list]
         test_list = [os.path.join(args.D.data_dir, i) for i in data.test_list]
 
-        args.M.current_log_dir = os.path.join(args.M.parent_log_dir, str(index))
+        args.M.current_log_dir = os.path.join(args.M.parent_log_dir, str(i))
 
         # 默认情况下，会清空已有的current_log_dir
         if os.path.exists(args.M.current_log_dir):
@@ -689,7 +656,7 @@ def run(cfg_path="Config/swint.yaml", tag="base", indexs=None, restore=False):
                 os.mkdir(args.M.current_log_dir)
 
         os.environ["CUDA_VISIBLE_DEVICES"] = prepare_gpu()
-        print(f"[INFO] start the pipline: {index}.yaml")
+        print(f"[INFO] start the pipline: {i}.yaml")
         p = mp.Process(target=pipline, args=(args, train_list, valid_list, test_list))
         p.start()
         processes.append(p)
@@ -698,7 +665,7 @@ def run(cfg_path="Config/swint.yaml", tag="base", indexs=None, restore=False):
         p.join()
 
 
-def info(logname):
+def stat(logname):
     items = {"name": [], "seed": [], "r2": [], "rmse": [], "mape": []}
     log_list = glob.glob(f"{logname}/*/")
     for log in log_list:
@@ -719,12 +686,109 @@ def info(logname):
         items["mape"].append(mape)
     items["name"].append("Average")
     items["seed"].append("-1")
-    items["r2"].append(np.average([float(i) for i in items["r2"]]))
-    items["rmse"].append(np.average([float(i) for i in items["rmse"]]))
-    items["mape"].append(np.average([float(i) for i in items["mape"]]))
+    items["r2"].append(round(np.average([float(i) for i in items["r2"]]), 4))
+    items["rmse"].append(round(np.average([float(i) for i in items["rmse"]]), 4))
+    items["mape"].append(round(np.average([float(i) for i in items["mape"]]), 3))
     # print(items)
     df = pd.DataFrame(items, index=None)
     df.to_csv(f"{logname}/STAT.csv", index=False)
+    print(df)
+
+
+def predict(log_dir):
+    # 删除以前生成的日志文件
+    os.system(f"rm {log_dir}/events*")
+    os.environ["CUDA_VISIBLE_DEVICES"] = prepare_gpu()
+    writer = SummaryWriter(log_dir=log_dir)
+
+    meters = {
+        "y": Meter(),
+        "yhat": Meter(),
+        "name": Meter(),
+        "lon": Meter(),
+        "lat": Meter(),
+        "ind": Meter(),
+        "indhat": Meter(),
+        "img_fea": Meter(),
+        "num_fea": Meter(),
+        "gp_feat": Meter(),
+    }
+    for fold in glob.glob(f"{log_dir}/*/"):
+        cv_index = os.path.basename(os.path.dirname(fold))
+        args = parse_yaml(os.path.join(fold, "config.yaml"))
+        setup_seed(args.M.seed)
+        data_list = parse_yaml(os.path.join(f"{log_dir}/{cv_index}.yaml"))
+        test_list = data_list["test_list"]
+        test_list = [os.path.join(args["D"]["data_dir"], i) for i in test_list]
+        model, callback = prepare_model(args)
+        loader = DataLoader(
+            mpi_dataset(args, test_list),
+            batch_size=1,
+            shuffle=False,
+            num_workers=0,
+        )
+        with torch.no_grad():
+            model.eval()
+            model.load_state_dict(torch.load(args["M"]["best_weight_path"]))
+            if args["GP"]["is_gp"]:
+                gp = gp_model(sigma=1, r_loc=2.5, r_year=10, sigma_e=0.32, sigma_b=0.01)
+                gp.restore(args["GP"]["best_gp_path"])
+
+            for img, num, lbl, ind in loader:
+                img = img.float().cuda()
+                num = num.float().cuda()
+                y = lbl["MPI3_fixed"].float().cuda()
+                ind = ind.float().cuda()
+                yhat, indhat, _ = model(img, num)
+                if args["GP"]["is_gp"]:
+                    gp.append_testing_params(
+                        callback["gp_feat"].data,
+                        np.stack([lbl["lat"], lbl["lon"]], -1),
+                        lbl["year"].item(),
+                        lbl["poi_num"].item(),
+                        lbl["poi_num"].item(),
+                    )
+                meters["y"].update(y)
+                meters["yhat"].update(yhat)
+                meters["name"].update(lbl["name"])
+                meters["lon"].update(lbl["lon"])
+                meters["lat"].update(lbl["lat"])
+                meters["ind"].update(ind)
+                meters["indhat"].update(indhat)
+                meters["img_fea"].update(callback["img_fea"].data)
+                meters["num_fea"].update(callback["num_fea"].data)
+                meters["gp_feat"].update(callback["gp_feat"].data)
+
+            if args["GP"]["is_gp"]:
+                ygp = gp.gp_run(
+                    model.state_dict()["head1.0.weight"].cpu(),
+                    model.state_dict()["head1.0.bias"].cpu(),
+                )
+
+            # r2 = r2_score(ygp, meters["y"].cat()).numpy().item()
+            # rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
+
+            # writer.add_scalar("Test/r2", acc["test/r2"], epoch)
+            # writer.add_scalar("Test/rmse", acc["test/rmse"], epoch)
+            # writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
+            # writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
+
+        df = {
+            "name": meters["name"].cat(),
+            "y": meters["y"].cat(),
+            "yhat": meters["yhat"].cat(),
+            "lon": meters["lon"].cat(),
+            "lat": meters["lat"].cat(),
+            "img_fea": meters["img_fea"].cat(),
+            "num_fea": meters["num_fea"].cat(),
+            "gp_feat": meters["gp_feat"].cat(),
+        }
+
+        count_analysis(df, cv_index, writer)
+        feature_statistics(df, cv_index, writer)
+        chart_1_fold_result(df, cv_index, writer)
+
+    writer.close()
 
 
 if __name__ == "__main__":

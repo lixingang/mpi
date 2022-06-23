@@ -1,7 +1,7 @@
 M:
   model: swint
   img_size: 224
-  batch_size: 40
+  batch_size: 25
   seed: 2022
   best_acc: -99
   best_weight_path: null
@@ -12,14 +12,14 @@ M:
   root_log_dir: Logs
   parent_log_dir: null
   current_log_dir: null
-  max_early_stop: 30
-  split_method: holdout  
-  # split_method: cv
+  max_early_stop: 20
+  # split_method: holdout  
+  split_method: cv
   k_fold: 5
   losses:
     loss: 1.0
     # ind_loss: 0.01
-    tri_loss: 0.01
+    tri_loss: 0.0001
 
   scheduler:
     milestones:
@@ -53,7 +53,6 @@ D:
     # 重建
 
   num_keys:
-    - Households_num
     - road_length
     - death_num
     - building_area
@@ -62,8 +61,8 @@ D:
     - place_num
     - poi_num
     - water
-    # - lat
-    # - lon
+    - lat
+    - lon
     - year
   label_keys:
     - MPI3_fixed
@@ -86,7 +85,7 @@ D:
     - Assets
 
 GP:
-  is_gp: 1
+  is_gp: 0
   best_gp_path: null
   sigma: 2
   r_loc: 2.5 
