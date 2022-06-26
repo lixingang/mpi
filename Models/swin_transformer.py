@@ -713,15 +713,12 @@ class SwinTransformer(nn.Module):
             )
             self.layers.append(layer)
 
-        # num_keys layers
         self.num_layers = nn.Sequential(
             nn.Linear(in_chans[1], 48),
             nn.BatchNorm1d(48),
             nn.Linear(48, 48),
             nn.BatchNorm1d(48),
             nn.Linear(48, 48),
-            # nn.LayerNorm(64),
-            # nn.ReLU(inplace=True),
         )
 
         self.norm = norm_layer(self.num_features)
@@ -734,15 +731,23 @@ class SwinTransformer(nn.Module):
 
         # head
 
-        self.head1 = nn.Sequential(nn.Linear(self.num_features, 1))
-        self.head2 = nn.Sequential(nn.Linear(self.num_features, 10), nn.ReLU())
+        self.head = nn.Sequential(
+            nn.Linear(self.num_features, self.num_features),
+            nn.ReLU(),
+            nn.Linear(self.num_features, 1),
+        )
+        self.head_num = nn.Sequential(
+            nn.Linear(self.num_features, self.num_features),
+            nn.ReLU(),
+            nn.Linear(self.num_features, 11),
+        )
 
         self.apply(self._init_weights)
 
         self.fds_config1 = dict(
             feature_dim=self.num_features,
             start_update=0,
-            start_smooth=30,
+            start_smooth=10,
             kernel="gaussian",
             ks=10,
             sigma=2,
@@ -750,7 +755,7 @@ class SwinTransformer(nn.Module):
         self.fds_config2 = dict(
             feature_dim=48,
             start_update=0,
-            start_smooth=30,
+            start_smooth=10,
             kernel="gaussian",
             ks=5,
             sigma=2,
@@ -818,13 +823,13 @@ class SwinTransformer(nn.Module):
                 num = self.FDS2.smooth(num, aux["label"], aux["epoch"])
         fea = torch.cat((img, num), dim=1)
         fea = self.neck(fea)
-
-        x_hat = self.head1(fea)
-        xi_hat = self.head2(fea)
+        x_hat = self.head(fea)
+        num_hat = self.head_num(fea)
+        # xi_hat = self.head2(fea)
 
         # self.indicator_weights = torch.nn.Parameter(self.indicator_weights)
         # x = torch.sum(torch.mul(self.indicator_weights, ind_hat), dim=-1)
-        return x_hat, xi_hat, fea
+        return x_hat, num_hat, fea
 
     def flops(self):
         flops = 0

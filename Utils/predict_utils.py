@@ -100,7 +100,7 @@ def feature_statistics(df, cv_index, writer):
     y = np.array(df["y"])
     # img_fea = np.array(df["img_fea"])
     # num_fea = np.array(df["num_fea"])
-    all_fea = np.array(df["gp_feat"])
+    all_fea = np.array(df["neck_feat"])
     hist_index, iter_list = get_hist(y, 0.0, 0.9, 0.02)
 
     hist_fea = {"Mean": [], "Variance": []}

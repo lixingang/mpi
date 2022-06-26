@@ -188,11 +188,11 @@ def prepare_model(args):
             len(args.D.num_keys),
         ).cuda()
         print(model, file=open(os.path.join(args.M.current_log_dir, "model.txt"), "a"))
-        hook1 = model.head1[0].register_forward_hook(callback["gp_feat"])
+        hook1 = model.head1[0].register_forward_hook(callback["neck_feat"])
         hook2 = model.fclayer[4].register_forward_hook(callback["weights_fea"])
 
     elif args.M.model.lower() == "swint":
-        callback["gp_feat"] = SaveOutput()
+        callback["neck_feat"] = SaveOutput()
         callback["img_fea"] = SaveOutput()
         callback["num_fea"] = SaveOutput()
         model = SwinTransformer(
@@ -228,7 +228,7 @@ def prepare_model(args):
             file=open(os.path.join(args.M.parent_log_dir, "model_parameter.txt"), "w"),
         )
 
-        hook1 = model.neck[-1].register_forward_hook(callback["gp_feat"])
+        hook1 = model.neck[-1].register_forward_hook(callback["neck_feat"])
         hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
         hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
 
@@ -271,22 +271,24 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
 
         loss = args.M.losses.loss * weighted_huber_loss(yhat, y)
         if "ind_loss" in args.M.losses.keys():
-            loss += args.M.losses.ind_loss * weighted_huber_loss(indhat, ind)
+            loss2 = args.M.losses.ind_loss * weighted_huber_loss(indhat, num)
+            loss += loss2
         if "tri_loss" in args.M.losses.keys():
-            loss += args.M.losses.tri_loss * calc_triplet_loss(feat, y - 0, 0.8 - 0)
-
+            loss3 = args.M.losses.tri_loss * calc_triplet_loss(feat, y - 0, 0.8 - 0)
+            loss += loss3
         # loss = loss1
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
         meters["loss"].update(loss)
+        meters["loss2"].update(loss2)
         meters["y"].update(y)
         meters["yhat"].update(yhat)
 
         if args.GP.is_gp:
             gp_training_params = {
-                "feat": callback["gp_feat"].data,
+                "feat": callback["neck_feat"].data,
                 "loc": np.stack([lbl["lat"], lbl["lon"]], -1),
                 "year": lbl["year"],
                 "poi": lbl["poi_num"],
@@ -299,18 +301,11 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     rmse = math.sqrt(
         mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
     )
-    acc = {
-        "train/loss": meters["loss"].avg(),
-        # "train/loss2": meters["loss2"].avg(),
-        # "train/tri_loss": meters["tri_loss"].avg(),
-        # "train/r2": r2,
-        # "train/rmse": rmse,
-    }
 
     logging.info(f"[train] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f}")
 
-    writer.add_scalar("train/loss", acc["train/loss"], epoch)
-    # writer.add_scalar("train/loss2", acc["train/loss2"], epoch)
+    writer.add_scalar("train/loss", meters["loss"].avg(), epoch)
+    writer.add_scalar("train/loss2", meters["loss2"].avg(), epoch)
     # writer.add_scalar("train/tri_loss", acc["train/tri_loss"], epoch)
 
     # writer.add_scalar("Train/r2", acc["train/r2"], epoch)
@@ -326,14 +321,16 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
                 aux = {"epoch": epoch, "label": y}
                 yhat, _, _ = model(img, num, aux)
                 meters["img_fea"].update(callback["img_fea"].data)
-                # meters["num_fea"].update(callback["num_fea"].data)
+                meters["num_fea"].update(callback["num_fea"].data)
                 meters["y"].update(y)
         model.FDS1.update_last_epoch_stats(epoch)
         model.FDS1.update_running_stats(
             meters["img_fea"].cat(), meters["y"].cat(), epoch
         )
-
-    return acc
+        model.FDS2.update_last_epoch_stats(epoch)
+        model.FDS2.update_running_stats(
+            meters["num_fea"].cat(), meters["y"].cat(), epoch
+        )
 
 
 def valid_epoch(args, model, callback, loader, writer, gp=None):
@@ -352,7 +349,7 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             yhat, indhat, feat = out[0], out[1], out[2]
             if gp:
                 gp.append_testing_params(
-                    callback["gp_feat"].data,
+                    callback["neck_feat"].data,
                     np.stack([lbl["lat"], lbl["lon"]], -1),
                     lbl["year"],
                     lbl["poi_num"],
@@ -365,7 +362,6 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
         rmse = math.sqrt(
             mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         )
-        acc = {"valid/r2": r2, "valid/rmse": rmse}
 
         logging.info(
             f"[valid] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f} "
@@ -385,10 +381,10 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
                 f"[gp-valid] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f} "
             )
 
-        writer.add_scalar("valid/r2", acc["valid/r2"], epoch)
-        writer.add_scalar("valid/rmse", acc["valid/rmse"], epoch)
+        writer.add_scalar("valid/r2", r2, epoch)
+        writer.add_scalar("valid/rmse", rmse, epoch)
 
-    return acc
+    return r2
 
 
 def test_epoch(args, model, callback, loader, writer, gp=None):
@@ -407,7 +403,9 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             "lat": Meter(),
             "ind": Meter(),
             "indhat": Meter(),
+            "num": Meter(),
         }
+
         for img, num, lbl, ind in loader:
             img = img.float().cuda()
             num = num.float().cuda()
@@ -417,7 +415,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             yhat, indhat, feat = out[0], out[1], out[2]
             if args.GP.is_gp:
                 gp.append_testing_params(
-                    callback["gp_feat"].data,
+                    callback["neck_feat"].data,
                     np.stack([lbl["lat"], lbl["lon"]], -1),
                     lbl["year"],
                     lbl["poi_num"],
@@ -430,13 +428,12 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             meters["lat"].update(lbl["lat"])
             meters["ind"].update(ind)
             meters["indhat"].update(indhat)
+            meters["num"].update(num)
 
         r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         rmse = math.sqrt(
             mean_squared_error(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
         )
-
-        acc = {"test/r2": r2, "test/rmse": rmse}
 
         logging.info(f"[test] Testing with {args['M']['best_weight_path']}")
         logging.info(f"[test] r2={r2:.3f} rmse={rmse:.4f}")
@@ -448,16 +445,12 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             )
             r2 = r2_score(ygp, meters["y"].cat()).numpy().item()
             rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
-            acc = {"test/r2": r2, "test/rmse": rmse}
-
             logging.info(
                 f"[gp-test] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f} "
             )
 
-        writer.add_scalar("test/r2", acc["test/r2"], epoch)
-        writer.add_scalar("test/rmse", acc["test/rmse"], epoch)
-        # writer.add_histogram("Test/img_fea", callback["img_fea"].data, epoch)
-        # writer.add_histogram("Test/num_fea", callback["num_fea"].data, epoch)
+        writer.add_scalar("test/r2", r2, epoch)
+        writer.add_scalar("test/rmse", rmse, epoch)
 
         df = pd.DataFrame(
             {
@@ -470,28 +463,29 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
         )
         df.to_csv(os.path.join(args.M.current_log_dir, "predict.csv"))
         torch.save(model, os.path.join(args.M.current_log_dir, "final_model.pt"))
-        # indicator_columns = [
-        #     "Child mortality",
-        #     "Nutrition",
-        #     "School attendance",
-        #     "Years of schooling",
-        #     "Electricity",
-        #     "Drinking water",
-        #     "Sanitation",
-        #     "Housing",
-        #     "Cooking fuel",
-        #     "Assets",
-        # ]
 
-        # df1 = pd.DataFrame(
-        #     meters["indhat"].cat().cpu().detach().numpy(), columns=indicator_columns
-        # )
-        # df2 = pd.DataFrame(
-        #     meters["ind"].cat().cpu().detach().numpy(), columns=indicator_columns
-        # )
-        # df1.to_csv(os.path.join(args.M.current_log_dir, "ind_hat.csv"))
-        # df2.to_csv(os.path.join(args.M.current_log_dir, "ind.csv"))
-        return acc
+        indicator_columns = [
+            "road_length",
+            "death_num",
+            "building_area",
+            "burnedCount",
+            "conflict_num",
+            "place_num",
+            "poi_num",
+            "water",
+            "lat",
+            "lon",
+            "year",
+        ]
+
+        df1 = pd.DataFrame(
+            meters["indhat"].cat().cpu().detach().numpy(), columns=indicator_columns
+        )
+        df2 = pd.DataFrame(
+            meters["num"].cat().cpu().detach().numpy(), columns=indicator_columns
+        )
+        df1.to_csv(os.path.join(args.M.current_log_dir, "num_hat.csv"))
+        df2.to_csv(os.path.join(args.M.current_log_dir, "num.csv"))
 
 
 def pipline(args, train_list, valid_list, test_list):
@@ -579,17 +573,15 @@ def pipline(args, train_list, valid_list, test_list):
 
         # training
         if epoch % 1 == 0:
-            _ = train_epoch(
+            train_epoch(
                 args, train_model, callback, train_loader, optimizer, writer, gp
             )
 
         # validation
         if epoch > 10 and epoch % 5 == 0:
-            valid_acc = valid_epoch(
-                args, train_model, callback, valid_loader, writer, gp
-            )
-            if valid_acc["valid/r2"] > args.M.best_acc:
-                args.M.best_acc = valid_acc["valid/r2"]
+            acc = valid_epoch(args, train_model, callback, valid_loader, writer, gp)
+            if acc > args.M.best_acc:
+                args.M.best_acc = acc
                 args.M.best_weight_path = os.path.join(
                     args.M.current_log_dir, "best_r2.pth"
                 )
@@ -603,7 +595,7 @@ def pipline(args, train_list, valid_list, test_list):
                 early_stop = 0
                 # if best validation model, then testing
                 test_model, test_callback = prepare_model(args)
-                _ = test_epoch(args, test_model, test_callback, test_loader, writer, gp)
+                test_epoch(args, test_model, test_callback, test_loader, writer, gp)
             else:
                 early_stop += 1
                 logging.info(
@@ -617,7 +609,7 @@ def pipline(args, train_list, valid_list, test_list):
     final test
     """
     test_model, callback = prepare_model(args)
-    _ = test_epoch(args, test_model, callback, test_loader, writer, gp)
+    test_epoch(args, test_model, callback, test_loader, writer, gp)
 
     # save args
     save_yaml(args, os.path.join(args.M.current_log_dir, "config.yaml"))
@@ -711,7 +703,7 @@ def predict(log_dir):
         "indhat": Meter(),
         "img_fea": Meter(),
         "num_fea": Meter(),
-        "gp_feat": Meter(),
+        "neck_feat": Meter(),
     }
     for fold in glob.glob(f"{log_dir}/*/"):
         cv_index = os.path.basename(os.path.dirname(fold))
@@ -740,14 +732,14 @@ def predict(log_dir):
                 y = lbl["MPI3_fixed"].float().cuda()
                 ind = ind.float().cuda()
                 yhat, indhat, _ = model(img, num)
-                if args["GP"]["is_gp"]:
-                    gp.append_testing_params(
-                        callback["gp_feat"].data,
-                        np.stack([lbl["lat"], lbl["lon"]], -1),
-                        lbl["year"].item(),
-                        lbl["poi_num"].item(),
-                        lbl["poi_num"].item(),
-                    )
+                # if args["GP"]["is_gp"]:
+                #     gp.append_testing_params(
+                #         callback["neck_feat"].data,
+                #         np.stack([lbl["lat"], lbl["lon"]], -1),
+                #         lbl["year"].item(),
+                #         lbl["poi_num"].item(),
+                #         lbl["poi_num"].item(),
+                #     )
                 meters["y"].update(y)
                 meters["yhat"].update(yhat)
                 meters["name"].update(lbl["name"])
@@ -757,13 +749,13 @@ def predict(log_dir):
                 meters["indhat"].update(indhat)
                 meters["img_fea"].update(callback["img_fea"].data)
                 meters["num_fea"].update(callback["num_fea"].data)
-                meters["gp_feat"].update(callback["gp_feat"].data)
+                meters["neck_feat"].update(callback["neck_feat"].data)
 
-            if args["GP"]["is_gp"]:
-                ygp = gp.gp_run(
-                    model.state_dict()["head1.0.weight"].cpu(),
-                    model.state_dict()["head1.0.bias"].cpu(),
-                )
+            # if args["GP"]["is_gp"]:
+            #     ygp = gp.gp_run(
+            #         model.state_dict()["head1.0.weight"].cpu(),
+            #         model.state_dict()["head1.0.bias"].cpu(),
+            #     )
 
             # r2 = r2_score(ygp, meters["y"].cat()).numpy().item()
             # rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
@@ -781,7 +773,7 @@ def predict(log_dir):
             "lat": meters["lat"].cat(),
             "img_fea": meters["img_fea"].cat(),
             "num_fea": meters["num_fea"].cat(),
-            "gp_feat": meters["gp_feat"].cat(),
+            "neck_feat": meters["neck_feat"].cat(),
         }
 
         count_analysis(df, cv_index, writer)

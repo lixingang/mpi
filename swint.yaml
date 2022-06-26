@@ -18,8 +18,8 @@ M:
   k_fold: 5
   losses:
     loss: 1.0
-    # ind_loss: 0.01
-    tri_loss: 0.0001
+    ind_loss: 0.01
+    # tri_loss: 0.0001
 
   scheduler:
     milestones:
@@ -29,7 +29,7 @@ M:
     
 D:
   source: Data/nga_mpi.csv
-  data_dir: Data/origin224
+  data_dir: Data/NORM224
   img_keys:
     - BLUE
     - GREEN
@@ -96,6 +96,6 @@ GP:
   sigma_b: 0.01
   
 FDS:
-  is_fds: 0
+  is_fds: 1
 
 
