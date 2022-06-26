@@ -204,29 +204,29 @@ def prepare_model(args):
             depths=[2, 2, 6],
             num_heads=[3, 6, 12],
             window_size=int(args.M.img_size / 32),
-            mlp_ratio=2.0,
+            mlp_ratio=4.0,
             drop_rate=0.0,
             attn_drop_rate=0.00,
             drop_path_rate=0.01,
         ).cuda()
 
-        model_parameter = summary(
-            model,
-            input_size=[
-                (
-                    1,
-                    len(args.D.img_keys),
-                    args.M.img_size,
-                    args.M.img_size,
-                ),
-                (1, len(args.D.num_keys)),
-            ],
-            verbose=0,
-        )
-        print(
-            model_parameter,
-            file=open(os.path.join(args.M.parent_log_dir, "model_parameter.txt"), "w"),
-        )
+        # model_parameter = summary(
+        #     model,
+        #     input_size=[
+        #         (
+        #             1,
+        #             len(args.D.img_keys),
+        #             args.M.img_size,
+        #             args.M.img_size,
+        #         ),
+        #         (1, len(args.D.num_keys)),
+        #     ],
+        #     verbose=0,
+        # )
+        # print(
+        #     model_parameter,
+        #     file=open(os.path.join(args.M.parent_log_dir, "model_parameter.txt"), "w"),
+        # )
 
         hook1 = model.neck[-1].register_forward_hook(callback["neck_feat"])
         hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
@@ -282,7 +282,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         optimizer.zero_grad()
 
         meters["loss"].update(loss)
-        meters["loss2"].update(loss2)
+        # meters["loss2"].update(loss2)
         meters["y"].update(y)
         meters["yhat"].update(yhat)
 
@@ -305,7 +305,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
     logging.info(f"[train] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f}")
 
     writer.add_scalar("train/loss", meters["loss"].avg(), epoch)
-    writer.add_scalar("train/loss2", meters["loss2"].avg(), epoch)
+    # writer.add_scalar("train/loss2", meters["loss2"].avg(), epoch)
     # writer.add_scalar("train/tri_loss", acc["train/tri_loss"], epoch)
 
     # writer.add_scalar("Train/r2", acc["train/r2"], epoch)
