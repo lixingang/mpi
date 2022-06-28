@@ -18,7 +18,7 @@ M:
   k_fold: 5
   losses:
     loss: 1.0
-    # ind_loss: 0.01
+    # ind_loss: 0.1
     # tri_loss: 0.0001
 
   scheduler:
