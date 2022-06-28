@@ -96,6 +96,6 @@ GP:
   sigma_b: 0.01
   
 FDS:
-  is_fds: 1
+  is_fds: 0
 
 
