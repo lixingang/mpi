@@ -12,6 +12,10 @@ import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from Models.fds import FDS
 from entmax import sparsemax, entmax15, entmax_bisect
+import os, sys
+
+sys.path.append("/home/lxg/mpi")
+from Losses.loss import weighted_huber_loss
 
 
 class Mlp(nn.Module):
@@ -653,7 +657,8 @@ class SwinTransformer(nn.Module):
         self.patch_norm = patch_norm
         self.num_features = int((embed_dim) * 2 ** (self.num_layers - 1))
         self.mlp_ratio = mlp_ratio
-
+        self.norm_layer = norm_layer
+        self.in_chans = in_chans
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
             img_size=img_size,
@@ -712,70 +717,8 @@ class SwinTransformer(nn.Module):
                 use_checkpoint=use_checkpoint,
             )
             self.layers.append(layer)
-
-        self.num_layers = nn.Sequential(
-            nn.Linear(in_chans[1], 48),
-            nn.BatchNorm1d(48),
-            nn.Linear(48, 48),
-            nn.BatchNorm1d(48),
-            nn.Linear(48, 48),
-        )
-
-        self.norm = norm_layer(self.num_features)
+        self.norm = self.norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
-
-        self.neck = nn.Sequential(
-            nn.Linear(self.num_features + 48, self.num_features),
-            nn.Linear(self.num_features, self.num_features),
-        )
-
-        # head
-
-        self.head = nn.Sequential(
-            nn.Linear(self.num_features, self.num_features),
-            nn.ReLU(),
-            nn.Linear(self.num_features, 1),
-        )
-        self.head_num = nn.Sequential(
-            nn.Linear(self.num_features, self.num_features),
-            nn.ReLU(),
-            nn.Linear(self.num_features, 11),
-        )
-
-        self.apply(self._init_weights)
-
-        self.fds_config1 = dict(
-            feature_dim=self.num_features,
-            start_update=0,
-            start_smooth=10,
-            kernel="gaussian",
-            ks=10,
-            sigma=2,
-        )
-        self.fds_config2 = dict(
-            feature_dim=48,
-            start_update=0,
-            start_smooth=10,
-            kernel="gaussian",
-            ks=5,
-            sigma=2,
-        )
-
-        self.FDS1 = FDS(**self.fds_config1)
-        self.FDS2 = FDS(**self.fds_config2)
-
-        # self.indicator_weights = torch.nn.Parameter(
-        #     torch.tensor(
-        #         [1/6.0,1/6.0,1/6.0,1/6.0,1/18.0,1/18.0,1/18.0,1/18.0,1/18.0,1/18.0,
-        #         ]
-        #     )
-        # )
-
-        # self.calibrated_layer = nn.Sequential(
-        #     nn.Linear(self.num_features, self.num_features),
-        #     nn.ReLU(),
-        #     nn.Linear(self.num_features, self.num_features),
-        # )
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -794,43 +737,6 @@ class SwinTransformer(nn.Module):
     def no_weight_decay_keywords(self):
         return {"relative_position_bias_table"}
 
-    def forward_features(self, x, num=None):
-        x = self.channel_enhance(x)
-        x = self.CA_layer(x)
-        x = self.patch_embed(x)
-
-        if self.ape:
-            x = x + self.absolute_pos_embed
-        x = self.pos_drop(x)
-
-        for layer in self.layers:
-            x = layer(x)
-
-        x = self.norm(x)  # B L C
-        x = self.avgpool(x.transpose(1, 2))  # B C 1
-        x = torch.flatten(x, 1)
-        return x
-
-    def forward(self, img, num, aux={}):
-
-        img = self.forward_features(img)
-        if len(aux) != 0:
-            if aux["epoch"] >= self.fds_config1["start_smooth"]:
-                img = self.FDS1.smooth(img, aux["label"], aux["epoch"])
-        num = self.num_layers(num)
-        if len(aux) != 0:
-            if aux["epoch"] >= self.fds_config2["start_smooth"]:
-                num = self.FDS2.smooth(num, aux["label"], aux["epoch"])
-        fea = torch.cat((img, num), dim=1)
-        fea = self.neck(fea)
-        x_hat = self.head(fea)
-        num_hat = self.head_num(fea)
-        # xi_hat = self.head2(fea)
-
-        # self.indicator_weights = torch.nn.Parameter(self.indicator_weights)
-        # x = torch.sum(torch.mul(self.indicator_weights, ind_hat), dim=-1)
-        return x_hat, num_hat, fea
-
     def flops(self):
         flops = 0
         flops += self.patch_embed.flops()
@@ -844,57 +750,6 @@ class SwinTransformer(nn.Module):
         )
         flops += self.num_features * self.num_classes
         return flops
-
-
-class CAM_Module(nn.Module):
-    """Channel attention module"""
-
-    def __init__(self, in_dim):
-        super(CAM_Module, self).__init__()
-        self.chanel_in = in_dim
-
-        self.gamma = nn.Parameter(torch.zeros(1))
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, x):
-        """
-        inputs :
-            x : input feature maps( B X C X H X W)
-        returns :
-            out : attention value + input feature
-            attention: B X C X C
-        """
-        m_batchsize, C, height, width = x.size()
-        proj_query = x.view(m_batchsize, C, -1)
-        proj_key = x.view(m_batchsize, C, -1).permute(0, 2, 1)
-        energy = torch.bmm(proj_query, proj_key)
-        energy_new = torch.max(energy, -1, keepdim=True)[0].expand_as(energy) - energy
-        attention = self.softmax(energy_new)
-        proj_value = x.view(m_batchsize, C, -1)
-
-        out = torch.bmm(attention, proj_value)
-        out = out.view(m_batchsize, C, height, width)
-
-        out = self.gamma * out + x
-        return out
-
-
-# class AutoEncoder(nn.Module):
-#     def __init__(self, in_chan1, in_chan2, reduction=16):
-#         super(SELayer, self).__init__()
-#         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-
-#         self.encoder = nn.Sequential(
-#             nn.Linear(
-#                 in_chan1,
-#             )
-#         )
-
-#     def forward(self, img, num):
-#         b, c, _, _ = x.size()
-#         y = self.avg_pool(x).view(b, c)
-#         y = self.fc(y).view(b, c, 1, 1)
-#         return x * y.expand_as(x)
 
 
 class SELayer(nn.Module):
@@ -913,6 +768,39 @@ class SELayer(nn.Module):
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         return x * y.expand_as(x)
+
+
+# class CAM_Module(nn.Module):
+#     """Channel attention module"""
+
+#     def __init__(self, in_dim):
+#         super(CAM_Module, self).__init__()
+#         self.chanel_in = in_dim
+
+#         self.gamma = nn.Parameter(torch.zeros(1))
+#         self.softmax = nn.Softmax(dim=-1)
+
+#     def forward(self, x):
+#         """
+#         inputs :
+#             x : input feature maps( B X C X H X W)
+#         returns :
+#             out : attention value + input feature
+#             attention: B X C X C
+#         """
+#         m_batchsize, C, height, width = x.size()
+#         proj_query = x.view(m_batchsize, C, -1)
+#         proj_key = x.view(m_batchsize, C, -1).permute(0, 2, 1)
+#         energy = torch.bmm(proj_query, proj_key)
+#         energy_new = torch.max(energy, -1, keepdim=True)[0].expand_as(energy) - energy
+#         attention = self.softmax(energy_new)
+#         proj_value = x.view(m_batchsize, C, -1)
+
+#         out = torch.bmm(attention, proj_value)
+#         out = out.view(m_batchsize, C, height, width)
+
+#         out = self.gamma * out + x
+#         return out
 
 
 if __name__ == "__main__":

@@ -48,25 +48,6 @@ def logging_setting(log_dir):
     )
 
 
-# def prepare_folder(args):
-
-#     if os.path.exists(args.M.current_log_dir):
-#         message = input(
-#             "[INFO] found duplicate directories, whether to overwrite (Y/N/R) "
-#         )
-#         if message.lower() == "y":
-#             print("[INFO] deleting the existing logs...")
-#             shutil.rmtree(args.M.current_log_dir)
-#         elif message.lower() == "r":
-#             print("[INFO] restoring the existing logs...")
-#             return "restore"
-#         else:
-#             print("[INFO] canceled")
-#             sys.exit(0)
-
-#     os.makedirs(args.M.current_log_dir, exist_ok=True)
-
-
 def prepare_datalist(args):
     """
     创建Logs/tags文件夹(不覆盖),
@@ -180,22 +161,13 @@ def prepare_model(args):
     model = None
     callback = {}
 
-    # callback["weights_fea"] = SaveOutput()
+    callback["weights_fea"] = SaveOutput()
 
-    if args.M.model.lower() == "mlp":
-        model = MLP(
-            len(args.D.img_keys) * args.D.in_channel,
-            len(args.D.num_keys),
-        ).cuda()
-        print(model, file=open(os.path.join(args.M.current_log_dir, "model.txt"), "a"))
-        hook1 = model.head1[0].register_forward_hook(callback["neck_feat"])
-        hook2 = model.fclayer[4].register_forward_hook(callback["weights_fea"])
-
-    elif args.M.model.lower() == "swint":
+    if args.M.model.lower() == "swint":
         callback["neck_feat"] = SaveOutput()
         callback["img_fea"] = SaveOutput()
         callback["num_fea"] = SaveOutput()
-        model = SwinTransformer(
+        model = MpiForecastModel(
             img_size=args.M.img_size,
             patch_size=4,
             in_chans=(len(args.D.img_keys), len(args.D.num_keys)),
@@ -230,7 +202,7 @@ def prepare_model(args):
 
         hook1 = model.neck[-1].register_forward_hook(callback["neck_feat"])
         hook3 = model.avgpool.register_forward_hook(callback["img_fea"])
-        hook4 = model.num_layers[-1].register_forward_hook(callback["num_fea"])
+        hook4 = model.num_layers.layers[-1].register_forward_hook(callback["num_fea"])
 
     return model, callback
 
@@ -267,12 +239,11 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         y = lbl["MPI3_fixed"].float().cuda()
         ind = ind.float().cuda()
         out = model(img, num)
-        yhat, indhat, feat = out[0], out[1], out[2]
+        yhat, loss_num_rec, feat = out[0], out[1], out[2]
 
         loss = args.M.losses.loss * weighted_huber_loss(yhat, y)
-        if "ind_loss" in args.M.losses.keys():
-            loss2 = args.M.losses.ind_loss * weighted_huber_loss(indhat, num)
-            loss += loss2
+        loss += 0.1 * loss_num_rec
+
         if "tri_loss" in args.M.losses.keys():
             loss3 = args.M.losses.tri_loss * calc_triplet_loss(feat, y - 0, 0.8 - 0)
             loss += loss3
@@ -346,7 +317,7 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             out = model(img, num)
-            yhat, indhat, feat = out[0], out[1], out[2]
+            yhat, _, feat = out[0], out[1], out[2]
             if gp:
                 gp.append_testing_params(
                     callback["neck_feat"].data,
@@ -412,7 +383,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             y = lbl["MPI3_fixed"].float().cuda()
             ind = ind.float().cuda()
             out = model(img, num)
-            yhat, indhat, feat = out[0], out[1], out[2]
+            yhat, _, feat = out[0], out[1], out[2]
             if args.GP.is_gp:
                 gp.append_testing_params(
                     callback["neck_feat"].data,
@@ -427,7 +398,7 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             meters["lon"].update(lbl["lon"])
             meters["lat"].update(lbl["lat"])
             meters["ind"].update(ind)
-            meters["indhat"].update(indhat)
+            # meters["indhat"].update(indhat)
             meters["num"].update(num)
 
         r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
@@ -478,13 +449,13 @@ def test_epoch(args, model, callback, loader, writer, gp=None):
             "year",
         ]
 
-        df1 = pd.DataFrame(
-            meters["indhat"].cat().cpu().detach().numpy(), columns=indicator_columns
-        )
+        # df1 = pd.DataFrame(
+        #     meters["indhat"].cat().cpu().detach().numpy(), columns=indicator_columns
+        # )
         df2 = pd.DataFrame(
             meters["num"].cat().cpu().detach().numpy(), columns=indicator_columns
         )
-        df1.to_csv(os.path.join(args.M.current_log_dir, "num_hat.csv"))
+        # df1.to_csv(os.path.join(args.M.current_log_dir, "num_hat.csv"))
         df2.to_csv(os.path.join(args.M.current_log_dir, "num.csv"))
 
 
