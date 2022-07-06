@@ -231,7 +231,7 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         "yhat": Meter(),
         "loss1": Meter(),
         "loss2": Meter(),
-        "tri_loss": Meter(),
+        "loss3": Meter(),
     }
     for img, num, lbl, ind in loader:
         img = img.float().cuda()
@@ -239,21 +239,20 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
         y = lbl["MPI3_fixed"].float().cuda()
         ind = ind.float().cuda()
         out = model(img, num)
-        yhat, loss_num_rec, feat = out[0], out[1], out[2]
+        yhat, (loss2, loss3), feat = out[0], out[1], out[2]
 
-        loss = args.M.losses.loss * weighted_huber_loss(yhat, y)
-        loss += 0.1 * loss_num_rec
+        loss1 = weighted_huber_loss(yhat, y)
+        loss = 1.0 * loss1
+        loss += 1e-2 * loss2
+        loss += 1e-4 * loss3
 
-        if "tri_loss" in args.M.losses.keys():
-            loss3 = args.M.losses.tri_loss * calc_triplet_loss(feat, y - 0, 0.8 - 0)
-            loss += loss3
-        # loss = loss1
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
-        meters["loss"].update(loss)
-        # meters["loss2"].update(loss2)
+        meters["loss1"].update(loss1)
+        meters["loss2"].update(loss2)
+        meters["loss3"].update(loss3)
         meters["y"].update(y)
         meters["yhat"].update(yhat)
 
@@ -275,9 +274,9 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
 
     logging.info(f"[train] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f}")
 
-    writer.add_scalar("train/loss", meters["loss"].avg(), epoch)
-    # writer.add_scalar("train/loss2", meters["loss2"].avg(), epoch)
-    # writer.add_scalar("train/tri_loss", acc["train/tri_loss"], epoch)
+    writer.add_scalar("train/loss1", meters["loss1"].avg(), epoch)
+    writer.add_scalar("train/loss2", meters["loss2"].avg(), epoch)
+    writer.add_scalar("train/loss3", meters["loss3"].avg(), epoch)
 
     # writer.add_scalar("Train/r2", acc["train/r2"], epoch)
     # writer.add_scalar("Train/rmse", acc["train/rmse"], epoch)
@@ -346,8 +345,6 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
             r2 = r2_score(meters["yhat"].cat(), meters["y"].cat()).numpy().item()
             rmse = math.sqrt(mean_squared_error(ygp, meters["y"].cat()).numpy().item())
 
-            acc = {"valid/r2": r2, "valid/rmse": rmse}
-
             logging.info(
                 f"[gp-valid] epoch {epoch}/{args.M.epochs} r2={r2:.3f} rmse={rmse:.4f} "
             )
@@ -355,7 +352,7 @@ def valid_epoch(args, model, callback, loader, writer, gp=None):
         writer.add_scalar("valid/r2", r2, epoch)
         writer.add_scalar("valid/rmse", rmse, epoch)
 
-    return r2
+    return rmse
 
 
 def test_epoch(args, model, callback, loader, writer, gp=None):
@@ -469,7 +466,7 @@ def pipline(args, train_list, valid_list, test_list):
     )
 
     # 4.定义 data loader
-    LABELS = [label["MPI3_fixed"] for _, _, label, _ in mpi_dataset(args, train_list)]
+    # LABELS = [label["MPI3_fixed"] for _, _, label, _ in mpi_dataset(args, train_list)]
     # WEIGHTS = get_lds_weights(LABELS)
 
     transform = A.Compose(
@@ -551,7 +548,7 @@ def pipline(args, train_list, valid_list, test_list):
         # validation
         if epoch > 10 and epoch % 5 == 0:
             acc = valid_epoch(args, train_model, callback, valid_loader, writer, gp)
-            if acc > args.M.best_acc:
+            if acc < args.M.best_acc:
                 args.M.best_acc = acc
                 args.M.best_weight_path = os.path.join(
                     args.M.current_log_dir, "best_r2.pth"

@@ -659,6 +659,8 @@ class SwinTransformer(nn.Module):
         self.mlp_ratio = mlp_ratio
         self.norm_layer = norm_layer
         self.in_chans = in_chans
+        self.patch_size = patch_size
+        self.img_size = img_size
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
             img_size=img_size,

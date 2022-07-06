@@ -3,7 +3,7 @@ M:
   img_size: 224
   batch_size: 25
   seed: 2022
-  best_acc: -99
+  best_acc: 99
   best_weight_path: null
   epochs: 2000
   crt_epoch: 1
@@ -12,19 +12,15 @@ M:
   root_log_dir: Logs
   parent_log_dir: null
   current_log_dir: null
-  max_early_stop: 20
+  max_early_stop: 15
   # split_method: holdout  
   split_method: cv
   k_fold: 5
-  losses:
-    loss: 1.0
-    ind_loss: 0.01
     # tri_loss: 0.0001
 
   scheduler:
     milestones:
-      - 50
-      - 100
+      - 10
     gamma: 0.1
     
 D:
