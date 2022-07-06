@@ -671,9 +671,9 @@ class SwinTransformer(nn.Module):
         )
 
         self.channel_enhance = nn.Sequential(
-            nn.Conv2d(in_chans[0], 32, 1, 1, 0),
-            nn.BatchNorm2d(32),
-            nn.Conv2d(32, in_chans[0], 1, 1, 0),
+            nn.Conv2d(in_chans[0], 48, 1, 1, 0),
+            nn.BatchNorm2d(48),
+            nn.Conv2d(48, in_chans[0], 1, 1, 0),
         )
 
         self.CA_layer = SELayer(in_chans[0], 4)
@@ -725,6 +725,7 @@ class SwinTransformer(nn.Module):
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=0.02)
+            # nn.init.kaiming_uniform_(m.weight,a=0, mode='fan_in', nonlinearity='relu')
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):

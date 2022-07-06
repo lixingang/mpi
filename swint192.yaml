@@ -1,6 +1,6 @@
 M:
   model: swint
-  img_size: 224
+  img_size: 192
   batch_size: 40
   seed1: 2022
   seed2: 42
@@ -13,7 +13,7 @@ M:
   root_log_dir: Logs
   parent_log_dir: null
   current_log_dir: null
-  max_early_stop: 15
+  max_early_stop: 30
   # split_method: holdout  
   split_method: cv
   k_fold: 5
@@ -21,11 +21,11 @@ M:
 
   scheduler:
     milestones: 5
-    gamma: 0.8
+    gamma: 0.5
     
 D:
   source: Data/nga_mpi.csv
-  data_dir: Data/norm224
+  data_dir: Data/norm192
   img_keys:
     - BLUE
     - GREEN

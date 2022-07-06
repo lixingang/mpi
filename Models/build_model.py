@@ -13,7 +13,7 @@ from Losses.loss import *
 class MpiForecastModel(SwinTransformer):
     def __init__(self, **kargs):
         super().__init__(**kargs)
-        self.mask_ratio = 0.05
+        self.mask_ratio = 0.001
         # num
         self.num_layers = NumLayers(in_chans=self.in_chans[1])
         # img
@@ -34,6 +34,7 @@ class MpiForecastModel(SwinTransformer):
         # concat
         self.neck = nn.Sequential(
             nn.Linear(self.num_features + 48, self.num_features),
+            nn.BatchNorm1d(self.num_features),
             nn.Linear(self.num_features, self.num_features),
         )
 
@@ -45,12 +46,11 @@ class MpiForecastModel(SwinTransformer):
         )
         self.head_num = nn.Sequential(
             nn.Linear(self.num_features, self.num_features),
-            nn.ReLU(),
+            nn.BatchNorm1d(self.num_features),
             nn.Linear(self.num_features, 11),
         )
         self.head_img = nn.Sequential(
             nn.Linear(self.num_features, self.num_features),
-            # nn.BatchNorm1d(self.num_features),
             nn.Linear(
                 self.num_features,
                 int(
@@ -62,6 +62,11 @@ class MpiForecastModel(SwinTransformer):
                 )
                 * self.embed_dim,
             ),
+        )
+        self.head_img2 = nn.Sequential(
+            nn.Linear(self.embed_dim, self.embed_dim),
+            # nn.BatchNorm1d(self.embed_dim),
+            # nn.Linear(self.embed_dim, self.embed_dim),
         )
 
         self.initialize_weights()
@@ -142,6 +147,7 @@ class MpiForecastModel(SwinTransformer):
         img_hat = self.head_img(fea)
         img_hat = img_hat.view(img_hat.shape[0], -1, self.embed_dim)
         img_hat = img_hat + self.de_pos_embed
+        img_hat = self.head_img2(img_hat)
         # xi_hat = self.head2(fea)
 
         loss_img_rec = torch.mean(weighted_huber_loss(img_hat, img_rec_target))
@@ -158,9 +164,12 @@ class MpiForecastModel(SwinTransformer):
         #     ,
         # )
 
-        pos_embed = get_2d_sincos_pos_embed(
-            self.pos_embed.shape[-1],
-            int((self.img_size**2 / (self.patch_size**2)) ** 0.5),
+        pos_embed = (
+            get_2d_sincos_pos_embed(
+                self.pos_embed.shape[-1],
+                int((self.img_size**2 / (self.patch_size**2)) ** 0.5),
+            )
+            / 1000
         )
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
@@ -181,8 +190,6 @@ class NumLayers(nn.Module):
         self.out_chans = out_chans
         self.layers = nn.Sequential(
             nn.Linear(self.in_chans, self.out_chans),
-            nn.BatchNorm1d(self.out_chans),
-            nn.Linear(self.out_chans, self.out_chans),
             nn.BatchNorm1d(self.out_chans),
             nn.Linear(self.out_chans, self.out_chans),
         )

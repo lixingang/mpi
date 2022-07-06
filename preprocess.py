@@ -122,7 +122,7 @@ not_norm_list = [
 
 # [31:  223, 31:  223]
 # [15:  239,15:  239]
-def tf2pth(source_dir="Data/raw_data", target_dir="Data/NROM224", t_type=np.float32):
+def tf2pth(source_dir="Data/raw_data", target_dir="Data/norm192", t_type=np.float32):
 
     os.makedirs(target_dir, exist_ok=True)
     mpi_indicator = pd.read_csv("Data/nga_mpi.csv", low_memory=False)
@@ -132,28 +132,6 @@ def tf2pth(source_dir="Data/raw_data", target_dir="Data/NROM224", t_type=np.floa
         content = decode_example(next(it))
 
         res = {}
-        for key in content.keys():
-            if isinstance(content[key], list):
-                continue
-
-            if key in args.D.img_keys:
-                res[key] = np.reshape(content[key], (255, 255))[15:239, 15:239]
-                res[key] = (
-                    (res[key] - NORM_MIN[key]) / (NORM_MAX[key] - NORM_MIN[key]) * 255
-                ).astype(t_type)
-                res[key] = torch.from_numpy(res[key])
-
-            if key in args.D.num_keys:
-                res[key] = content[key]
-                res[key] = (
-                    (res[key] - NORM_MIN[key]) / (NORM_MAX[key] - NORM_MIN[key]) * 255
-                ).astype(t_type)
-                res[key] = torch.from_numpy(res[key])
-            if key in args.D.label_keys:
-                res[key] = content[key]
-                res[key] = torch.from_numpy(res[key])
-                # if key == "MPI3_fixed":
-                #     res[key] = np.where(res[key] > 0.7, 0.71, res[key])
 
         # 在pth文件中加入nga_mpi中的额外信息
         dhsclust = int(content["DHSCLUST1"].item())
@@ -167,6 +145,31 @@ def tf2pth(source_dir="Data/raw_data", target_dir="Data/NROM224", t_type=np.floa
             if isinstance(col_data.item(), str):
                 continue
             res[col_name] = torch.from_numpy(np.asarray([col_data.item()]))
+
+        for key in content.keys():
+            if isinstance(content[key], list):
+                continue
+
+            elif key in args.D.img_keys:
+                res[key] = np.reshape(content[key], (255, 255))[31:223, 31:223]
+                res[key] = (
+                    (res[key] - NORM_MIN[key]) / (NORM_MAX[key] - NORM_MIN[key])
+                ).astype(t_type)
+                res[key] = torch.from_numpy(res[key])
+
+            elif key in args.D.num_keys:
+                res[key] = content[key]
+                res[key] = (
+                    (res[key] - NORM_MIN[key]) / (NORM_MAX[key] - NORM_MIN[key])
+                ).astype(t_type)
+                res[key] = torch.from_numpy(res[key])
+            elif key in args.D.label_keys:
+                res[key] = content[key]
+                res[key] = torch.from_numpy(res[key])
+                # if key == "MPI3_fixed":
+                #     res[key] = np.where(res[key] > 0.7, 0.71, res[key])
+            else:
+                pass
 
         save_name = f"nga_{year}_{dhsclust}.pth"
         # if res["MPI3_fixed"] <= 0.001:
@@ -194,7 +197,7 @@ def tf2pth(source_dir="Data/raw_data", target_dir="Data/NROM224", t_type=np.floa
 #                 continue
 
 #             if key in args.D.img_keys:
-#                 img_array.append(np.reshape(content[key], (255, 255))[15:239, 15:239])
+#                 img_array.append(np.reshape(content[key], (255, 255))[31:223, 31:223])
 #             if key in args.D.num_keys:
 #                 res[key] = content[key]
 #             if key in args.D.label_keys:

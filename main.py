@@ -173,13 +173,13 @@ def prepare_model(args):
             in_chans=(len(args.D.img_keys), len(args.D.num_keys)),
             num_classes=256,
             embed_dim=96,
-            depths=[2, 2, 6],
-            num_heads=[3, 6, 12],
+            depths=[2, 2, 4],
+            num_heads=[6, 6, 12],
             window_size=int(args.M.img_size / 32),
             mlp_ratio=4.0,
             drop_rate=0.0,
             attn_drop_rate=0.00,
-            drop_path_rate=0.01,
+            drop_path_rate=0.2,
         ).cuda()
 
         # model_parameter = summary(
@@ -243,8 +243,8 @@ def train_epoch(args, model, callback, loader, optimizer, writer, gp=None):
 
         loss1 = weighted_huber_loss(yhat, y)
         loss = 1.0 * loss1
-        loss += 1e-2 * loss2
-        loss += 1e-4 * loss3
+        loss += 1e-4 * loss2
+        loss += 0 * loss3
 
         loss.backward()
         optimizer.step()
@@ -514,7 +514,6 @@ def pipline(args, train_list, valid_list, test_list):
         filter(lambda p: p.requires_grad, train_model.parameters()),
         lr=args["M"]["init_lr"],
     )
-    scheduler = MultiStepLR(optimizer, **args.M.scheduler)
 
     # 7.开始训练，以最优的valid模型进行test
     early_stop = 0  # early stop
@@ -546,7 +545,7 @@ def pipline(args, train_list, valid_list, test_list):
             )
 
         # validation
-        if epoch > 10 and epoch % 5 == 0:
+        if epoch > 15 and epoch % 1 == 0:
             acc = valid_epoch(args, train_model, callback, valid_loader, writer, gp)
             if acc < args.M.best_acc:
                 args.M.best_acc = acc
@@ -564,6 +563,8 @@ def pipline(args, train_list, valid_list, test_list):
                 # if best validation model, then testing
                 test_model, test_callback = prepare_model(args)
                 test_epoch(args, test_model, test_callback, test_loader, writer, gp)
+                # save args
+                save_yaml(args, os.path.join(args.M.current_log_dir, "config.yaml"))
             else:
                 early_stop += 1
                 logging.info(
@@ -571,24 +572,26 @@ def pipline(args, train_list, valid_list, test_list):
                 )
             if early_stop >= args.M.max_early_stop:
                 break
+            if early_stop > 5 and early_stop % args.M.scheduler.milestones == 0:
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = param_group["lr"] * args.M.scheduler.gamma
+                    print("Change lr to", param_group["lr"])
 
-        scheduler.step()
     """
     final test
     """
     test_model, callback = prepare_model(args)
     test_epoch(args, test_model, callback, test_loader, writer, gp)
 
-    # save args
-    save_yaml(args, os.path.join(args.M.current_log_dir, "config.yaml"))
     return "OK"
 
 
 def train(cfg_path="Config/swint.yaml", tag="base", index=None, restore=False):
     args = parse_yaml(cfg_path)
     args.M.parent_log_dir = os.path.join(args.M.root_log_dir, tag)
-    setup_seed(args.M.seed)
+    setup_seed(args.M.seed1)
     prepare_datalist(args)
+    setup_seed(args.M.seed2)
     processes = []
     if args.M.split_method == "cv" and index == None:
         run_indexs = range(1, args.M.k_fold + 1)
